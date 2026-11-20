@@ -17,7 +17,7 @@ namespace RidgeRelay.Editor
             "Idle", "Run", "Jump", "Fall", "Land", "Stumble", "Finish", "Gadget"
         };
 
-        public override uint GetVersion() => 3;
+        public override uint GetVersion() => 4;
         public override int GetPostprocessOrder() => 1000;
 
         private void OnPreprocessModel()
@@ -47,7 +47,7 @@ namespace RidgeRelay.Editor
             foreach (ModelImporterClipAnimation clip in clips)
             {
                 clip.name = StateName(clip.name);
-                clip.loopTime = clip.name == "Idle" || clip.name == "Run";
+                clip.loopTime = clip.name == "Idle" || clip.name == "Run" || clip.name == "Finish";
             }
             model.clipAnimations = clips;
         }

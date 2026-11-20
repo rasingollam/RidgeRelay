@@ -275,6 +275,24 @@ namespace RidgeRelay.Editor
                     renderer.sharedMaterial.name == "Tailwind"),
                 "Tailwind use should show an active trail.");
 
+            currentStep = "collecting Magnet and tapping the power button";
+            Press(Key.RightArrow);
+            yield return () => runner.Lane == 0;
+            Press();
+            yield return () => runner.Held == Gadget.Magnet || runner.Distance > 88;
+            Require(runner.Held == Gadget.Magnet && HasLabel(hud, "MAGNET"), "The second gate should award Magnet.");
+            Vector2 magnetButton = ControlPosition(hud, "MAGNET");
+            SetTouch(1, TouchPhase.Began, magnetButton);
+            yield return () => runner.CastPower == Gadget.Magnet && runner.CastTime > 0;
+            SetTouch(1, TouchPhase.Ended, magnetButton);
+            Require(runner.Held == Gadget.None, "Tapping Magnet should consume the pickup.");
+            yield return () => runner.CastPower == Gadget.None;
+            yield return null;
+            Require(Array.Exists(effects.GetComponentsInChildren<MeshRenderer>(),
+                renderer => renderer.enabled && renderer.name == "Power impact" &&
+                    renderer.sharedMaterial.name == "Magnet field"),
+                "Magnet should display its impact on rivals.");
+
             currentStep = "completing the course";
             Time.timeScale = 8;
             int pulseFrame = -1;

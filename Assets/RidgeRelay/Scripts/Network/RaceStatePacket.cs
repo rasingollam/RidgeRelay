@@ -7,7 +7,7 @@ namespace RidgeRelay
     internal sealed class RaceStatePacket
     {
         private const int MaxTraps = 32;
-        private const int RunnerBytes = 10 + sizeof(uint) + 13 * sizeof(float);
+        private const int RunnerBytes = 15 + sizeof(uint) + 16 * sizeof(float);
         private const int HeaderBytes = 3 * sizeof(int) + 2;
         private const int TrapBytes = 2 + 2 * sizeof(float);
         internal const int Capacity = HeaderBytes + RunnerBytes * RaceSimulation.Entrants + TrapBytes * MaxTraps;
@@ -91,6 +91,8 @@ namespace RidgeRelay
             internal float Distance;
             private float lateral, height, finish, shield, boost, slow, recovery, immunity;
             private float slipstream, pulseWarning, itemCooldown, routeBoost;
+            private byte incomingPower, powerOwner, powerLane, castPower, impactPower;
+            private float powerWarning, castTime, impactTime;
 
             internal RunnerPacket(RunnerState runner)
             {
@@ -118,6 +120,14 @@ namespace RidgeRelay
                 pulseBlocks = (byte)Mathf.Min(byte.MaxValue, runner.PulseBlocks);
                 shortcutClears = (byte)Mathf.Min(byte.MaxValue, runner.ShortcutClears);
                 shortcutFalls = (byte)Mathf.Min(byte.MaxValue, runner.ShortcutFalls);
+                incomingPower = (byte)runner.IncomingPower;
+                powerOwner = (byte)(runner.PowerOwner + 1);
+                powerLane = (byte)(runner.PowerLane + 1);
+                castPower = (byte)runner.CastPower;
+                impactPower = (byte)runner.ImpactPower;
+                powerWarning = runner.PowerWarning;
+                castTime = runner.CastTime;
+                impactTime = runner.ImpactTime;
             }
 
             internal void Write(FastBufferWriter writer)
@@ -146,6 +156,14 @@ namespace RidgeRelay
                 writer.WriteValueSafe(pulseBlocks);
                 writer.WriteValueSafe(shortcutClears);
                 writer.WriteValueSafe(shortcutFalls);
+                writer.WriteValueSafe(incomingPower);
+                writer.WriteValueSafe(powerOwner);
+                writer.WriteValueSafe(powerLane);
+                writer.WriteValueSafe(castPower);
+                writer.WriteValueSafe(impactPower);
+                writer.WriteValueSafe(powerWarning);
+                writer.WriteValueSafe(castTime);
+                writer.WriteValueSafe(impactTime);
             }
 
             internal bool TryRead(ref FastBufferReader reader)
@@ -174,7 +192,19 @@ namespace RidgeRelay
                 reader.ReadValue(out pulseBlocks);
                 reader.ReadValue(out shortcutClears);
                 reader.ReadValue(out shortcutFalls);
-                return lane <= 2 && held <= (byte)Gadget.PulseShot &&
+                reader.ReadValue(out incomingPower);
+                reader.ReadValue(out powerOwner);
+                reader.ReadValue(out powerLane);
+                reader.ReadValue(out castPower);
+                reader.ReadValue(out impactPower);
+                reader.ReadValue(out powerWarning);
+                reader.ReadValue(out castTime);
+                reader.ReadValue(out impactTime);
+                return lane <= 2 && held <= (byte)Gadget.Shock &&
+                    incomingPower <= (byte)Gadget.Shock && castPower <= (byte)Gadget.Shock &&
+                    impactPower <= (byte)Gadget.Shock && powerLane <= 2 && powerOwner <= RaceSimulation.Entrants &&
+                    InRange(powerWarning, 0, RaceSimulation.RocketWindup) &&
+                    InRange(castTime, 0, RaceSimulation.RocketWindup) && InRange(impactTime, 0, 0.55f) &&
                     pulseLane <= 2 && pulseOwner <= RaceSimulation.Entrants &&
                     InRange(slipstream, 0, 1) && InRange(pulseWarning, 0, 0.65f) &&
                     InRange(itemCooldown, 0, 1.2f) && InRange(routeBoost, 0, 2.4f) &&
@@ -182,7 +212,7 @@ namespace RidgeRelay
                     InRange(lateral, -1.01f, 1.01f) && InRange(Distance, -2, RaceSimulation.CourseLength) &&
                     InRange(height, 0, 3) && InRange(finish, -1, 125) &&
                     InRange(shield, 0, 5) && InRange(boost, 0, 2.2f) &&
-                    InRange(slow, 0, 1.2f) && InRange(recovery, 0, 0.85f) && InRange(immunity, 0, 1.5f);
+                    InRange(slow, 0, 1.8f) && InRange(recovery, 0, 0.85f) && InRange(immunity, 0, 1.5f);
             }
 
             internal void Apply(RunnerState runner, RunnerPacket prior, float blend)
@@ -211,6 +241,14 @@ namespace RidgeRelay
                 runner.PulseBlocks = pulseBlocks;
                 runner.ShortcutClears = shortcutClears;
                 runner.ShortcutFalls = shortcutFalls;
+                runner.IncomingPower = (Gadget)incomingPower;
+                runner.PowerOwner = powerOwner - 1;
+                runner.PowerLane = powerLane - 1;
+                runner.CastPower = (Gadget)castPower;
+                runner.ImpactPower = (Gadget)impactPower;
+                runner.PowerWarning = powerWarning;
+                runner.CastTime = castTime;
+                runner.ImpactTime = impactTime;
             }
         }
     }

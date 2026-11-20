@@ -74,6 +74,7 @@ namespace RidgeRelay
         private bool mirrored;
         private bool jumpPending;
         private bool itemPending;
+        private float itemUseUntil;
         private int lanePending;
         private int inputFrame = -1;
         private float bestTime;
@@ -115,7 +116,9 @@ namespace RidgeRelay
         {
             PollInput();
             int lane = Math.Sign(lanePending);
-            RaceCommand command = new RaceCommand(lane, jumpPending, itemPending);
+            bool bufferedUse = race != null && race.Runners[PlayerSlot].Held != Gadget.None &&
+                Time.unscaledTime < itemUseUntil;
+            RaceCommand command = new RaceCommand(lane, jumpPending, itemPending || bufferedUse);
             lanePending -= lane;
             jumpPending = itemPending = false;
             return CanControlRace ? command : default;
@@ -248,6 +251,7 @@ namespace RidgeRelay
         {
             if (!CanControlRace || race.Runners[PlayerSlot].Held == Gadget.None) return;
             itemPending = true;
+            itemUseUntil = Time.unscaledTime + 0.6f;
             itemPressedUntil = Time.unscaledTime + 0.18f;
         }
 
@@ -255,6 +259,7 @@ namespace RidgeRelay
         {
             lanePending = 0;
             jumpPending = itemPending = false;
+            itemUseUntil = 0;
             gestures.Clear();
         }
 
@@ -350,13 +355,14 @@ namespace RidgeRelay
                 ? CountLabels[Mathf.Clamp(Mathf.CeilToInt(-race.Clock), 1, 3)]
                 : race.Clock < 0.65f ? "GO!" : string.Empty;
 
-            bool pulseNeedsTarget = runner.Held == Gadget.PulseShot && !race.HasPulseTarget(PlayerSlot);
-            string gadget = pulseNeedsTarget ? "PULSE SHOT · LINE UP" : GadgetName(runner.Held);
-            bool itemReady = runner.Held != Gadget.None && runner.ItemCooldown <= 0 && !pulseNeedsTarget;
+            bool needsTarget = !race.HasGadgetTarget(PlayerSlot, runner.Held);
+            string gadget = GadgetName(runner.Held);
+            bool itemReady = runner.Held != Gadget.None && runner.ItemCooldown <= 0 && !needsTarget;
             bool itemPressed = Time.unscaledTime < itemPressedUntil;
             bool lightButton = itemPressed || itemReady;
             item.Label.text = gadget;
-            itemHint.text = GadgetHint(runner.Held);
+            itemHint.text = runner.Held != Gadget.None && runner.ItemCooldown > 0 ? "Recharging" :
+                needsTarget ? TargetHint(runner.Held) : GadgetHint(runner.Held);
             item.Background.color = itemPressed ? Pressed : itemReady ? Gold : Panel;
             item.Label.color = lightButton ? Ink : runner.Held != Gadget.None ? Paper : Muted;
             itemHint.color = lightButton ? Ink : Muted;
@@ -364,12 +370,19 @@ namespace RidgeRelay
 
             if (runner.FinishTime >= 0) SetNotice("FINISHED / WAITING FOR RACERS", Mint);
             else if (runner.Recovery > 0) SetNotice("BACK ON COURSE", Gold);
+            else if (runner.PowerWarning > 0) SetNotice("ROCKET · SHIELD NOW", Coral);
+            else if (race.IncomingShockTime(PlayerSlot) > 0) SetNotice("SHOCK · EXIT RING OR SHIELD", Coral);
+            else if (race.HasIncomingMagnet(PlayerSlot))
+                SetNotice("MAGNET · SHIELD NOW", Coral);
             else if (runner.PulseWarning > 0)
                 SetNotice(PulseNotice(runner.PulseLane - runner.Lane), Coral);
             else if (TryFindTrap(runner, out int warningLane))
                 SetNotice(warningLane == 0 ? "▲  BRISTLES AHEAD" : warningLane < 0 ? "◀  BRISTLES LEFT" : "BRISTLES RIGHT  ▶", Coral);
             else if (race.Clock < outcomeUntil) SetNotice(outcomeText, Mint);
             else if (race.Clock < pickupNoticeUntil) SetNotice(pickupNotice, Gold);
+            else if (runner.ImpactTime > 0)
+                SetNotice(runner.ImpactPower == Gadget.ShellFilm ? "SHIELD BLOCKED POWER" :
+                    GadgetName(runner.ImpactPower) + " HIT", Coral);
             else if (runner.Slow > 0) SetNotice("SLOWED", Coral);
             else if (runner.RouteBoost > 0) SetNotice("SHORTCUT BOOST", Mint);
             else if (runner.Shield > 0) SetNotice("SHIELD ACTIVE", Mint);
@@ -656,6 +669,14 @@ namespace RidgeRelay
             return rect;
         }
 
+        private static string TargetHint(Gadget gadget) => gadget switch
+        {
+            Gadget.PulseShot => "Line up behind a rival",
+            Gadget.Rocket => "Needs a leader ahead",
+            Gadget.Magnet => "No rivals still racing",
+            _ => "Get closer to a rival"
+        };
+
         private static string GadgetHint(Gadget gadget)
         {
             switch (gadget)
@@ -664,6 +685,9 @@ namespace RidgeRelay
                 case Gadget.BristlePad: return "Tap to drop a slowing trap";
                 case Gadget.ShellFilm: return "Tap to block the next hit";
                 case Gadget.PulseShot: return "Tap to slow a rival ahead";
+                case Gadget.Magnet: return "Pull all rivals back";
+                case Gadget.Rocket: return "Homing rocket hits the leader";
+                case Gadget.Shock: return "Stun rivals inside the ring";
                 default: return "Collect a pickup";
             }
         }
@@ -676,6 +700,9 @@ namespace RidgeRelay
                 case Gadget.BristlePad: return "BRISTLE PAD";
                 case Gadget.ShellFilm: return "SHELL FILM";
                 case Gadget.PulseShot: return "PULSE SHOT";
+                case Gadget.Magnet: return "MAGNET";
+                case Gadget.Rocket: return "ROCKET";
+                case Gadget.Shock: return "SHOCK";
                 default: return "GADGET";
             }
         }

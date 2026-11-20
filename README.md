@@ -10,7 +10,7 @@ Ridge Relay is a 3D footrace prototype for Unity. Race through Windmill Gorge fr
 
 - Windmill Gorge features a hill crest, a downhill jump shortcut, and a split tunnel with a faster right-hand route.
 - Keyboard and touch controls, mirrored touch buttons, and a reduced-motion setting.
-- Four gadgets, checkpoint recovery, race results, and a locally saved best time.
+- Seven gadgets, checkpoint recovery, race results, and a locally saved best time.
 - Editable Blender sources for the rigged courier, environment and pickups.
 - Private races with join codes using Unity Multiplayer Services, Relay and Netcode for GameObjects. A linked Unity Cloud project is required for online play.
 
@@ -30,9 +30,14 @@ Ridge Relay is a 3D footrace prototype for Unity. Race through Windmill Gorge fr
 ## Race tactics
 
 - **Slipstream** builds while you follow close behind a rival in the same lane. Fill the meter for a short speed burst.
+- Finished racers move onto a terrace beyond the finish line, jump and wave, and display their finishing position. The camera moves to a side view while the remaining racers finish.
 - **Tailwind** gives an immediate burst. **Pulse Shot** warns a rival ahead in your lane before slowing them. Change lanes, jump, or use **Shell Film** to defend. **Bristle Pad** leaves a hazard for the runners behind you.
-- Pickup gates award one gadget per racer. The first gate teaches Tailwind. Later gates give trailing racers better odds of drawing Tailwind or Pulse Shot.
+- **Magnet** pulls every active rival back across the course. Shell Film blocks it.
+- **Rocket** locks onto the leader and follows lane changes. Use Shell Film before it lands.
+- **Shock** stuns nearby rivals inside the blue ring. Leave the radius or shield before it fires.
+- Every lane can collect from a pickup gate. The first two gates award Tailwind and Magnet. Later gates give trailing racers better odds of drawing comeback gadgets. An unusable held power can be replaced at the next gate.
 - Look for gold markings on the downhill shortcut and commit to a tunnel route before the divider. The narrower right passage is faster, and poor timing can still cost the advantage.
+- The route descends to a river trestle, climbs the ridge and winds down through a final valley. Offline bots leave more room for recovery. A bright blue backpack identifies your animal and the camera shifts sideways when rivals crowd you.
 
 ## Build and test
 

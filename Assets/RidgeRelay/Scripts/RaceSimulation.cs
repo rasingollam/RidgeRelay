@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace RidgeRelay
 {
-    public enum Gadget { None, Tailwind, BristlePad, ShellFilm, PulseShot }
+    public enum Gadget { None, Tailwind, BristlePad, ShellFilm, PulseShot, Magnet, Rocket, Shock }
     public enum RacePhase { Countdown, Running, Finished }
 
     public readonly struct RaceCommand
@@ -39,6 +39,14 @@ namespace RidgeRelay
         public float PulseWarning { get; internal set; }
         public int PulseLane { get; internal set; }
         public int PulseOwner { get; internal set; } = -1;
+        public Gadget IncomingPower { get; internal set; }
+        public int PowerOwner { get; internal set; } = -1;
+        public int PowerLane { get; internal set; }
+        public float PowerWarning { get; internal set; }
+        public Gadget CastPower { get; internal set; }
+        public float CastTime { get; internal set; }
+        public Gadget ImpactPower { get; internal set; }
+        public float ImpactTime { get; internal set; }
         public float ItemCooldown { get; internal set; }
         public float RouteBoost { get; internal set; }
         public int PulseHits { get; internal set; }
@@ -99,10 +107,13 @@ namespace RidgeRelay
         public const float CourseLength = 655;
         public const int Entrants = 4;
         public const float LaneWidth = 2;
-        public const float BaseSpeed = 9;
+        public const float BaseSpeed = 10;
         public const float SlipstreamActiveThreshold = 0.85f;
         public const float PulseWindup = 0.65f;
         public const float PulseRange = 23;
+        public const float ShockRadius = 6;
+        public const float PowerWindup = 0.65f;
+        public const float RocketWindup = 0.85f;
         public const float UseCooldown = 1.2f;
         public const float ShortcutBoostSeconds = 2.4f;
         public const float TunnelStart = 436;
@@ -118,33 +129,45 @@ namespace RidgeRelay
         {
             new CourseFeature(24, 25, 0),
             new CourseFeature(43, 47, -1, Gadget.Tailwind),
+            new CourseFeature(43, 47, 0, Gadget.Tailwind),
             new CourseFeature(43, 47, 1, Gadget.ShellFilm),
             new CourseFeature(70, 76, -1, gap: true),
+            new CourseFeature(83, 87, -1, Gadget.Magnet),
+            new CourseFeature(83, 87, 0, Gadget.Magnet),
+            new CourseFeature(83, 87, 1, Gadget.Magnet),
             new CourseFeature(96, 97, 1),
             new CourseFeature(132, 135, 0, Gadget.BristlePad),
             new CourseFeature(132, 135, 1, Gadget.BristlePad),
+            new CourseFeature(132, 135, -1, Gadget.BristlePad),
             new CourseFeature(154, 160, 0, gap: true),
             new CourseFeature(182, 183, -1),
             new CourseFeature(200, 203, -1, Gadget.Tailwind),
+            new CourseFeature(200, 203, 0, Gadget.Tailwind),
             new CourseFeature(200, 203, 1, Gadget.Tailwind),
             new CourseFeature(219, 220, 1),
             new CourseFeature(252, 258, 1, gap: true),
             new CourseFeature(274, 277, -1, Gadget.ShellFilm),
             new CourseFeature(274, 277, 0, Gadget.ShellFilm),
+            new CourseFeature(274, 277, 1, Gadget.ShellFilm),
             new CourseFeature(304, 305, 0),
             new CourseFeature(332, 336, -1, Gadget.BristlePad),
+            new CourseFeature(332, 336, 0, Gadget.BristlePad),
             new CourseFeature(332, 336, 1, Gadget.BristlePad),
             new CourseFeature(363, 364, 1),
             new CourseFeature(387, 393, -1, gap: true, shortcut: true),
             new CourseFeature(414, 417, -1, Gadget.Tailwind),
             new CourseFeature(414, 417, 0, Gadget.Tailwind),
+            new CourseFeature(414, 417, 1, Gadget.Tailwind),
             // The narrow tunnel earns its speed advantage only if the runner clears this hurdle.
             new CourseFeature(443, 444, TunnelFastLane),
             new CourseFeature(482, 488, 0, gap: true),
             new CourseFeature(514, 517, 0, Gadget.BristlePad),
+            new CourseFeature(514, 517, -1, Gadget.BristlePad),
             new CourseFeature(514, 517, 1, Gadget.BristlePad),
+            new CourseFeature(538, 539, 0),
             new CourseFeature(552, 553, -1),
             new CourseFeature(574, 577, -1, Gadget.Tailwind),
+            new CourseFeature(574, 577, 0, Gadget.Tailwind),
             new CourseFeature(574, 577, 1, Gadget.Tailwind),
             new CourseFeature(607, 613, 1, gap: true),
             new CourseFeature(632, 633, 0)
@@ -179,6 +202,7 @@ namespace RidgeRelay
         private int leader = -1;
         private int nextGapCheckpoint = 1;
         private readonly bool waitForAll;
+        private readonly bool relaxedBots;
         private readonly uint raceSeed;
 
         public IReadOnlyList<RunnerState> Runners => runners;
@@ -192,8 +216,9 @@ namespace RidgeRelay
         public RacePhase Phase { get; private set; }
         public float Clock => tick * StepSeconds;
 
-        public RaceSimulation(bool waitForAll = false, int seed = 4261)
+        public RaceSimulation(bool waitForAll = false, int seed = 4261, bool relaxedBots = false)
         {
+            this.relaxedBots = relaxedBots;
             this.waitForAll = waitForAll;
             raceSeed = unchecked((uint)seed);
             for (int i = 0; i < Entrants; i++)
@@ -223,6 +248,9 @@ namespace RidgeRelay
             traps.RemoveAll(trap => trap.Expires <= Clock);
             for (int i = 0; i < Entrants; i++) Move(i, commands[i]);
             for (int i = 0; i < Entrants; i++) ResolvePulse(i);
+            for (int i = 0; i < Entrants; i++) ResolvePower(i);
+            for (int i = 0; i < Entrants; i++) ResolveShock(i);
+            for (int i = 0; i < Entrants; i++) ResolveMagnet(i);
 
             // A finish only counts after all runners have advanced through this tick.
             while (finished < Entrants)
@@ -280,9 +308,160 @@ namespace RidgeRelay
             return false;
         }
 
+        public bool HasGadgetTarget(int index, Gadget gadget)
+        {
+            switch (gadget)
+            {
+                case Gadget.PulseShot: return HasPulseTarget(index);
+                case Gadget.Rocket: return FindLeader(index, false) >= 0;
+                case Gadget.Magnet:
+                    for (int i = 0; i < Entrants; i++)
+                        if (i != index && runners[i].FinishTime < 0) return true;
+                    return false;
+                case Gadget.Shock:
+                    for (int i = 0; i < Entrants; i++)
+                        if (i != index && CanTakePowerHit(runners[i]) &&
+                            WithinShockRadius(runners[index], runners[i])) return true;
+                    return false;
+                default: return true;
+            }
+        }
+
+        public bool HasIncomingMagnet(int slot)
+        {
+            for (int i = 0; i < Entrants; i++)
+                if (i != slot && runners[i].CastPower == Gadget.Magnet && runners[i].CastTime > 0)
+                    return true;
+            return false;
+        }
+
+        private int FindLeader(int owner, bool beforeMove)
+        {
+            int leader = -1;
+            float best = beforeMove ? priorDistance[owner] : runners[owner].Distance;
+            for (int i = 0; i < Entrants; i++)
+            {
+                float distance = beforeMove ? priorDistance[i] : runners[i].Distance;
+                if (i == owner || distance <= best || runners[i].FinishTime >= 0) continue;
+                leader = i;
+                best = distance;
+            }
+            return leader >= 0 && CanTakePowerHit(runners[leader]) &&
+                runners[leader].IncomingPower != Gadget.Rocket ? leader : -1;
+        }
+
+        private static bool WithinShockRadius(RunnerState owner, RunnerState target)
+        {
+            const float radius = ShockRadius;
+            float along = target.Distance - owner.Distance;
+            float lateral = (target.Lateral - owner.Lateral) * LaneWidth;
+            if (Math.Min(owner.Distance, target.Distance) >= TunnelStart &&
+                Math.Max(owner.Distance, target.Distance) <= TunnelEnd &&
+                (owner.Lateral > 0.5f) != (target.Lateral > 0.5f)) return false;
+            return along * along + lateral * lateral <= radius * radius;
+        }
+
+        private bool TryCastPower(int owner, Gadget gadget)
+        {
+            if (gadget == Gadget.Magnet || gadget == Gadget.Shock)
+            {
+                if (!HasGadgetTarget(owner, gadget)) return false;
+                runners[owner].CastPower = gadget;
+                runners[owner].CastTime = PowerWindup;
+                return true;
+            }
+            int leader = FindLeader(owner, true);
+            if (leader < 0) return false;
+            RunnerState target = runners[leader];
+            target.IncomingPower = gadget;
+            target.PowerOwner = owner;
+            target.PowerLane = (int)Math.Round(priorLateral[leader]);
+            target.PowerWarning = RocketWindup;
+            runners[owner].CastPower = gadget;
+            runners[owner].CastTime = RocketWindup;
+            return true;
+        }
+
+        private void ResolvePower(int index)
+        {
+            RunnerState target = runners[index];
+            if (target.IncomingPower != Gadget.Rocket) return;
+            target.PowerLane = (int)Math.Round(target.Lateral);
+            target.PowerWarning = Decay(target.PowerWarning);
+            if (target.PowerWarning > 0) return;
+
+            target.IncomingPower = Gadget.None;
+            target.PowerOwner = -1;
+            if (!CanTakePowerHit(target)) return;
+
+            target.ImpactPower = target.Shield > 0 ? Gadget.ShellFilm : Gadget.Rocket;
+            target.ImpactTime = 0.55f;
+            ApplyPowerHit(target);
+        }
+
+        public float IncomingShockTime(int slot)
+        {
+            float time = float.PositiveInfinity;
+            for (int i = 0; i < Entrants; i++)
+            {
+                RunnerState caster = runners[i];
+                if (i != slot && caster.CastPower == Gadget.Shock && caster.CastTime > 0 &&
+                    WithinShockRadius(caster, runners[slot])) time = Math.Min(time, caster.CastTime);
+            }
+            return float.IsPositiveInfinity(time) ? 0 : time;
+        }
+
+        private void ResolveShock(int owner)
+        {
+            RunnerState caster = runners[owner];
+            if (caster.CastPower != Gadget.Shock || caster.CastTime > 0) return;
+            caster.CastPower = Gadget.None;
+            for (int i = 0; i < Entrants; i++)
+            {
+                RunnerState target = runners[i];
+                if (i == owner || !CanTakePowerHit(target) ||
+                    !WithinShockRadius(caster, target)) continue;
+                target.ImpactPower = target.Shield > 0 ? Gadget.ShellFilm : Gadget.Shock;
+                target.ImpactTime = 0.55f;
+                ApplyPowerHit(target);
+            }
+        }
+
+        private void ResolveMagnet(int owner)
+        {
+            RunnerState caster = runners[owner];
+            if (caster.CastPower != Gadget.Magnet || caster.CastTime > 0) return;
+            caster.CastPower = Gadget.None;
+            for (int i = 0; i < Entrants; i++)
+            {
+                RunnerState target = runners[i];
+                if (i == owner || target.FinishTime >= 0 || target.Recovery > 0) continue;
+                target.ImpactTime = 0.55f;
+                if (target.Shield > 0)
+                {
+                    target.ImpactPower = Gadget.ShellFilm;
+                    target.Shield = 0;
+                    continue;
+                }
+                target.ImpactPower = Gadget.Magnet;
+                float floor = Checkpoints[target.Checkpoint];
+                int lane = (int)Math.Round(target.Lateral);
+                foreach (CourseFeature feature in Features)
+                    if (feature.Lane == lane && feature.Gap && feature.Start <= target.Distance)
+                        floor = Math.Max(floor, Math.Min(target.Distance, feature.End));
+                // Do not rewind into a gap or across the tunnel divider transition.
+                if (target.Distance >= TunnelLockStart)
+                    floor = Math.Max(floor, target.Distance >= TunnelLockEnd ? TunnelLockEnd : TunnelLockStart);
+                target.Distance = Math.Max(Math.Min(floor, target.Distance), target.Distance - 5f);
+                ApplyPowerHit(target);
+            }
+        }
+
         private void Move(int index, RaceCommand command)
         {
             RunnerState runner = runners[index];
+            runner.CastTime = Decay(runner.CastTime);
+            runner.ImpactTime = Decay(runner.ImpactTime);
             if (runner.FinishTime >= 0) return;
             runner.Boost = Decay(runner.Boost);
             runner.Shield = Decay(runner.Shield);
@@ -322,6 +501,11 @@ namespace RidgeRelay
                     case Gadget.PulseShot:
                         used = TryFirePulse(index);
                         break;
+                    case Gadget.Magnet:
+                    case Gadget.Rocket:
+                    case Gadget.Shock:
+                        used = TryCastPower(index, runner.Held);
+                        break;
                 }
                 if (used)
                 {
@@ -332,12 +516,19 @@ namespace RidgeRelay
 
             float previous = runner.Distance;
             float pace = BaseSpeed;
+            if (relaxedBots && index > 0)
+            {
+                // Offline rivals leave room to recover, while still contesting a close race.
+                float lead = runner.Distance - runners[0].Distance;
+                pace *= lead > 8 ? 0.90f : 0.95f;
+            }
             if (runner.Boost > 0) pace *= 1.35f;
             if (runner.RouteBoost > 0) pace *= 1.28f;
             if (runner.Slipstream >= SlipstreamActiveThreshold) pace *= 1.16f;
             if (occupiedLane == TunnelFastLane && previous >= TunnelStart && previous < TunnelEnd)
                 pace *= TunnelSpeedMultiplier;
-            if (runner.Slow > 0) pace *= 0.58f;
+            if (runner.Slow > 0)
+                pace *= runner.ImpactTime > 0 && runner.ImpactPower == Gadget.Shock ? 0.22f : 0.58f;
             runner.Distance += pace * StepSeconds;
 
             for (int i = 0; i < Features.Count; i++)
@@ -353,7 +544,8 @@ namespace RidgeRelay
                     continue;
                 if (feature.Item != Gadget.None)
                 {
-                    if (runner.Height < 1 && runner.Held == Gadget.None && IsPickupReady(i, index))
+                    if (runner.Height < 1 && IsPickupReady(i, index) &&
+                        (runner.Held == Gadget.None || !HasGadgetTarget(index, runner.Held)))
                     {
                         runner.Held = RollGadget(index, i, runner.Place);
                         runner.PickupMask |= GateBits[i];
@@ -410,12 +602,12 @@ namespace RidgeRelay
         private static uint[] BuildGateBits()
         {
             var bits = new uint[Features.Count];
+            int gate = 0;
             for (int i = 0; i < bits.Length; i++)
             {
                 if (Features[i].Item == Gadget.None) continue;
-                bits[i] = 1u << i;
-                if (i > 0 && Features[i - 1].Start == Features[i].Start && bits[i - 1] != 0)
-                    bits[i] = bits[i - 1];
+                bits[i] = i > 0 && Features[i - 1].Start == Features[i].Start && bits[i - 1] != 0
+                    ? bits[i - 1] : 1u << gate++;
             }
             return bits;
         }
@@ -424,17 +616,19 @@ namespace RidgeRelay
         {
             // The opening gate introduces the speed item before ranked pickup rolls.
             if (Features[feature].Start == 43) return Gadget.Tailwind;
+            if (Features[feature].Item == Gadget.Magnet) return Gadget.Magnet;
             int rank = Math.Max(1, Math.Min(Entrants, place));
             uint value = unchecked((raceSeed ^ GateBits[feature]) + (uint)runner * 0x9E3779B9u);
             value = unchecked((value ^ (value >> 16)) * 0x7FEB352Du);
             value = unchecked((value ^ (value >> 15)) * 0x846CA68Bu);
             int roll = (int)((value ^ (value >> 16)) % 100);
-            int tailwind = 18 + 9 * (rank - 1);
-            int pulse = 12 + 7 * (rank - 1);
-            int shell = 27 - 5 * (rank - 1);
-            if (roll < tailwind) return Gadget.Tailwind;
-            if (roll < tailwind + pulse) return Gadget.PulseShot;
-            return roll < tailwind + pulse + shell ? Gadget.ShellFilm : Gadget.BristlePad;
+            if ((roll -= 15 + 3 * (rank - 1)) < 0) return Gadget.Tailwind;
+            if ((roll -= 12) < 0) return Gadget.PulseShot;
+            if ((roll -= 7 * (rank - 1)) < 0) return Gadget.Rocket;
+            if ((roll -= 13) < 0) return Gadget.Magnet;
+            if ((roll -= 14) < 0) return Gadget.Shock;
+            if ((roll -= 23 - 5 * (rank - 1)) < 0) return Gadget.ShellFilm;
+            return Gadget.BristlePad;
         }
 
         public bool HasDraftRival(int index)
@@ -484,8 +678,12 @@ namespace RidgeRelay
                    rivalHeight < 0.35f && rival.Recovery <= 0 && rival.FinishTime < 0;
         }
 
+        private static bool CanTakePowerHit(RunnerState runner) =>
+            runner.FinishTime < 0 && runner.Recovery <= 0;
+
         private static bool CanTargetPulse(RunnerState runner) =>
-            runner.FinishTime < 0 && runner.Recovery <= 0 && runner.Immunity <= 0 && runner.PulseOwner < 0;
+            CanTakePowerHit(runner) && runner.Immunity <= 0 &&
+            runner.PulseOwner < 0 && runner.IncomingPower == Gadget.None;
 
         private bool TryFirePulse(int owner)
         {
@@ -557,6 +755,19 @@ namespace RidgeRelay
                 Metrics.RecordGap(nextGapCheckpoint, front - trailing);
                 nextGapCheckpoint++;
             }
+        }
+
+        private static void ApplyPowerHit(RunnerState runner)
+        {
+            if (runner.Shield > 0) runner.Shield = 0;
+            else
+            {
+                runner.Slow = 1.8f;
+                runner.Boost = 0;
+                runner.RouteBoost = 0;
+                runner.Slipstream = 0;
+            }
+            runner.Immunity = 0.7f;
         }
 
         private static void Hit(RunnerState runner)

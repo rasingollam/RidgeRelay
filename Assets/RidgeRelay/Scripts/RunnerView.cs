@@ -21,10 +21,27 @@ namespace RidgeRelay
         private float previousHeight;
         private float previousSlow;
         private Gadget previousItem;
+        private readonly System.Collections.Generic.List<Material> characterMaterials = new();
+        private static Texture2D localPalette;
+        private Texture originalPalette;
+        private bool isLocal;
+        private readonly TextMesh finishRank;
+        private float finishStarted = -1;
+        private Vector3 finishOrigin;
+        private Quaternion finishHeading;
 
         public RunnerView(int index)
         {
             root = new GameObject(index == 0 ? "Player courier" : $"Courier {index + 1}").transform;
+            finishRank = new GameObject("Finish position").AddComponent<TextMesh>();
+            finishRank.transform.SetParent(root, false);
+            finishRank.transform.localPosition = new Vector3(0, 2.05f, 0);
+            finishRank.anchor = TextAnchor.MiddleCenter;
+            finishRank.alignment = TextAlignment.Center;
+            finishRank.fontSize = 64;
+            finishRank.characterSize = 0.045f;
+            finishRank.color = new Color(1, 0.87f, 0.3f);
+            finishRank.gameObject.SetActive(false);
             if (Model != null)
             {
                 // The imported jerboa faces local -Z, while the track heading is +Z.
@@ -37,10 +54,16 @@ namespace RidgeRelay
                 if (animator == null) animator = model.AddComponent<Animator>();
                 animator.runtimeAnimatorController = Controller;
                 animator.applyRootMotion = false;
-                if (index > 0)
-                    foreach (Renderer renderer in model.GetComponentsInChildren<Renderer>())
-                        foreach (Material material in renderer.materials)
-                            material.color *= TeamColors[index];
+                foreach (Renderer renderer in model.GetComponentsInChildren<Renderer>())
+                    foreach (Material material in renderer.materials)
+                    {
+                        if (index > 0) material.color *= TeamColors[index];
+                        if (material.mainTexture == null) continue;
+                        originalPalette = material.mainTexture;
+                        characterMaterials.Add(material);
+                    }
+                if (localPalette == null && originalPalette != null)
+                    localPalette = CreateLocalPalette(originalPalette);
             }
             else
             {
@@ -54,6 +77,45 @@ namespace RidgeRelay
             }
         }
 
+        private static Texture2D CreateLocalPalette(Texture source)
+        {
+            // The Blender atlas puts the backpack canvas in the first cell of row two.
+            var target = RenderTexture.GetTemporary(source.width, source.height, 0,
+                RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+            RenderTexture previous = RenderTexture.active;
+            try
+            {
+                Graphics.Blit(source, target);
+                RenderTexture.active = target;
+                var palette = new Texture2D(source.width, source.height, TextureFormat.RGBA32, false)
+                {
+                    name = "Local player blue backpack",
+                    filterMode = FilterMode.Point,
+                    wrapMode = TextureWrapMode.Clamp
+                };
+                palette.ReadPixels(new Rect(0, 0, source.width, source.height), 0, 0);
+                int cell = source.width / 4;
+                for (int y = cell; y < cell * 2; y++)
+                    for (int x = 0; x < cell; x++)
+                        palette.SetPixel(x, y, new Color(0.12f, 0.42f, 1f));
+                palette.Apply(false, true);
+                return palette;
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+                RenderTexture.ReleaseTemporary(target);
+            }
+        }
+
+        public void MarkLocal(bool local)
+        {
+            if (isLocal == local) return;
+            isLocal = local;
+            foreach (Material material in characterMaterials)
+                material.mainTexture = local ? localPalette : originalPalette;
+        }
+
         public void SetPaused(bool paused)
         {
             if (animator != null) animator.speed = paused ? 0 : 1;
@@ -65,6 +127,25 @@ namespace RidgeRelay
             root.SetPositionAndRotation(
                 pose.Position + Vector3.up * state.Height,
                 Quaternion.LookRotation(pose.Forward, Vector3.up));
+            finishRank.gameObject.SetActive(state.FinishTime >= 0);
+            if (state.FinishTime >= 0)
+            {
+                if (finishStarted < 0)
+                {
+                    finishStarted = Time.time;
+                    finishOrigin = root.position;
+                    finishHeading = root.rotation;
+                }
+                TrackPose celebration = TrackView.FinishPose(state.Place);
+                float arrival = Mathf.SmoothStep(0, 1, (Time.time - finishStarted) / 1.1f);
+                root.SetPositionAndRotation(Vector3.Lerp(finishOrigin, celebration.Position, arrival),
+                    Quaternion.Slerp(finishHeading, Quaternion.LookRotation(
+                        celebration.Right * 0.85f - celebration.Forward * 0.53f, Vector3.up), arrival));
+                finishRank.text = state.Place == 1 ? "1st" : state.Place == 2 ? "2nd" :
+                    state.Place == 3 ? "3rd" : "4th";
+                if (Camera.main != null) finishRank.transform.rotation = Camera.main.transform.rotation;
+            }
+            else finishStarted = -1;
             root.gameObject.SetActive(state.Recovery <= 0);
             if (state.Recovery > 0)
             {
@@ -113,6 +194,7 @@ namespace RidgeRelay
                 1 - Mathf.Exp(-15 * Time.deltaTime));
             if (desired == "Run")
                 animator.speed = state.Slow > 0 ? 0.76f : accelerating ? 1.22f : 1;
+            else if (desired == "Finish") animator.speed = reducedMotion ? 0.75f : 1;
 
             previousHeight = state.Height;
             previousSlow = state.Slow;

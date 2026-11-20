@@ -22,19 +22,24 @@ namespace RidgeRelay
             if (race.Phase != RacePhase.Running || runner.Recovery > 0 || runner.FinishTime >= 0)
                 return default;
 
-            if (runner.PulseWarning > 0 && !sawPulse)
+            if (runner.Held == Gadget.ShellFilm && runner.Shield <= 0 && runner.ItemCooldown <= 0 &&
+                race.HasIncomingMagnet(index)) return new RaceCommand(useItem: true);
+
+            float shockWarning = race.IncomingShockTime(index);
+            float warning = Math.Max(shockWarning, Math.Max(runner.PulseWarning, runner.PowerWarning));
+            if (warning > 0 && !sawPulse)
             {
                 // Seeded attention lapses and reaction times leave an opening for a well-timed shot.
-                pulseReactionAt = random.NextDouble() < 0.16
+                pulseReactionAt = random.NextDouble() < 0.45
                     ? float.PositiveInfinity
-                    : race.Clock + 0.14f + 0.24f * (float)random.NextDouble();
+                    : race.Clock + 0.28f + 0.25f * (float)random.NextDouble();
             }
-            sawPulse = runner.PulseWarning > 0;
+            sawPulse = warning > 0;
             bool reactToPulse = sawPulse && race.Clock >= pulseReactionAt;
 
             const float shortcutLip = 387;
             float approach = shortcutLip - runner.Distance;
-            bool racingShortcut = takesShortcuts && runner.Slow <= 0 && runner.PulseWarning <= 0 &&
+            bool racingShortcut = takesShortcuts && runner.Slow <= 0 && warning <= 0 &&
                                   approach > 0 && approach <= 12;
             if (racingShortcut && runner.Lane == -1 && approach <= 1.15f && runner.Height <= 0)
                 return new RaceCommand(jump: true);
@@ -42,15 +47,18 @@ namespace RidgeRelay
             if (race.Clock < nextDecision) return default;
             nextDecision = race.Clock + 0.08f + 0.1f * (float)random.NextDouble();
 
-            if (reactToPulse && Math.Abs(runner.Lateral - runner.PulseLane) < 0.55f &&
+            bool areaAttack = shockWarning > 0 && runner.IncomingPower != Gadget.Rocket;
+            int threatenedLane = runner.IncomingPower == Gadget.Rocket ? runner.PowerLane : runner.PulseLane;
+            if (reactToPulse && (areaAttack || Math.Abs(runner.Lateral - threatenedLane) < 0.55f) &&
                 runner.Shield <= 0)
             {
                 if (runner.Held == Gadget.ShellFilm && runner.ItemCooldown <= 0)
                     return new RaceCommand(useItem: true);
-                int escape = FindSafeLane(runner, index);
-                if (escape != 0 && runner.PulseWarning >= 0.15f)
+                if (runner.IncomingPower == Gadget.Rocket) return default;
+                int escape = areaAttack ? 0 : FindSafeLane(runner, index);
+                if (escape != 0 && warning >= 0.15f)
                     return new RaceCommand(escape);
-                if (runner.PulseWarning <= 0.34f && runner.Height <= 0)
+                if (runner.IncomingPower != Gadget.Rocket && warning <= 0.34f && runner.Height <= 0)
                     return new RaceCommand(jump: true);
             }
 
@@ -105,6 +113,9 @@ namespace RidgeRelay
                 Gadget.ShellFilm => reactToPulse || TrapAhead(race, index),
                 Gadget.BristlePad => RivalBehind(race, index),
                 Gadget.PulseShot => race.HasPulseTarget(index),
+                Gadget.Magnet => runner.Place >= 3 && race.HasGadgetTarget(index, runner.Held) &&
+                    random.NextDouble() < 0.06,
+                Gadget.Rocket or Gadget.Shock => race.HasGadgetTarget(index, runner.Held),
                 _ => false
             });
             return new RaceCommand(laneDelta, jump, useItem);

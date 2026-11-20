@@ -7,6 +7,8 @@ namespace RidgeRelay
         private AudioSource source;
         private AudioClip countdown, start, finish, pickup, gadget, hit, landing, fall, warning;
         private AudioClip pulseWarning, pulseDodge, pulseBlock, pulseHit, draftBoost;
+        private AudioClip magnetWarning, rocketWarning, shockWarning;
+        private Gadget previousThreat;
         private Gadget previousItem;
         private float previousHeight;
         private float previousSlow;
@@ -42,11 +44,15 @@ namespace RidgeRelay
             pulseBlock = Tone("Pulse Blocked", 720, 360, 0.21f);
             pulseHit = Tone("Pulse Hit Confirmed", 370, 640, 0.17f);
             draftBoost = Tone("Slipstream Boost", 250, 820, 0.35f);
+            magnetWarning = Tone("Magnet Charging", 760, 160, 0.47f);
+            rocketWarning = Tone("Rocket Lock", 430, 1180, 0.42f);
+            shockWarning = Tone("Shock Charging", 1350, 470, 0.19f);
         }
 
         public void ResetRace()
         {
             previousItem = Gadget.None;
+            previousThreat = Gadget.None;
             previousHeight = previousSlow = previousRecovery = previousShield = nextWarning = 0;
             previousCount = 4;
             previousClock = previousPulseWarning = 0;
@@ -61,6 +67,9 @@ namespace RidgeRelay
         public void Present(RaceSimulation race, int slot = 0)
         {
             RunnerState player = race.Runners[slot];
+            Gadget threat = player.IncomingPower != Gadget.None ? player.IncomingPower :
+                race.IncomingShockTime(slot) > 0 ? Gadget.Shock :
+                race.HasIncomingMagnet(slot) ? Gadget.Magnet : Gadget.None;
             bool slipstreamActive = player.Slipstream >= RaceSimulation.SlipstreamActiveThreshold;
             if (!finished && player.FinishTime >= 0)
             {
@@ -88,14 +97,20 @@ namespace RidgeRelay
 
                 bool newPulse = player.PulseWarning > 0 && (previousPulseWarning <= 0 ||
                     player.PulseOwner != previousPulseOwner || player.PulseWarning > previousPulseWarning + 0.2f);
-                if (newPulse) source.PlayOneShot(pulseWarning, 0.49f);
+                if (threat != previousThreat && threat != Gadget.None)
+                {
+                    AudioClip cue = threat == Gadget.Rocket ? rocketWarning :
+                        threat == Gadget.Magnet ? magnetWarning : shockWarning;
+                    source.PlayOneShot(cue, 0.48f);
+                }
+                else if (newPulse) source.PlayOneShot(pulseWarning, 0.49f);
                 else if (pulseWasBlocked) source.PlayOneShot(pulseBlock, 0.42f);
                 else if (player.PulseDodges > previousPulseDodges) source.PlayOneShot(pulseDodge, 0.40f);
                 else if (player.PulseHits > previousPulseHits) source.PlayOneShot(pulseHit, 0.38f);
                 else if (slipstreamActive && !previousSlipstreamActive)
                     source.PlayOneShot(draftBoost, 0.32f);
 
-                if (player.PulseWarning <= 0 && race.Clock >= nextWarning)
+                if (player.PulseWarning <= 0 && threat == Gadget.None && race.Clock >= nextWarning)
                 {
                     foreach (var trap in race.Traps)
                     {
@@ -111,6 +126,7 @@ namespace RidgeRelay
 
             previousPhase = race.Phase;
             previousItem = player.Held;
+            previousThreat = threat;
             previousHeight = player.Height;
             previousSlow = player.Slow;
             previousRecovery = player.Recovery;

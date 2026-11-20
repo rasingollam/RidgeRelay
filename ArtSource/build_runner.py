@@ -181,6 +181,25 @@ def build_palette_atlas(skin):
     skin.data.materials.append(surface)
 
 
+def finish_keys():
+    wave = {
+        "spine": (-0.05, 0.04, -0.08), "head": (-0.08, 0.08, 0.10),
+        "upperArm.L": (-1.85, 0.35, -0.22), "forearm.L": (-0.40, 0.15, -0.35),
+        "upperArm.R": (0.12, -0.16, 0.12), "forearm.R": -0.30,
+        "thigh.L": -0.10, "thigh.R": -0.10, "shin.L": 0.22, "shin.R": 0.22,
+        "ear.L": -0.12, "ear.R": 0.12, "tail": (0.12, 0, 0.20),
+    }
+    other_wave = {**wave, "forearm.L": (-0.48, -0.20, 0.40),
+                  "head": (-0.05, -0.06, -0.06), "tail": (0.16, 0, -0.20)}
+    crouch = {**wave, "spine": 0.28, "thigh.L": -0.48, "thigh.R": -0.48,
+              "shin.L": 0.85, "shin.R": 0.85, "ear.L": 0.18, "ear.R": 0.12}
+    airborne = {**other_wave, "upperArm.R": (-1.65, -0.25, 0.20),
+                "forearm.R": -0.45, "thigh.L": -0.30, "thigh.R": -0.22,
+                "shin.L": 0.42, "shin.R": 0.36, "ear.L": -0.28, "ear.R": -0.22}
+    return [(1, 0, wave), (9, 0, other_wave), (16, 0, wave),
+            (22, -0.09, crouch), (30, 0.32, airborne), (35, 0.26, airborne),
+            (43, -0.09, crouch), (50, 0, other_wave), (61, 0, wave)]
+
 def motions(rig):
     # Pose in model-space axes, then convert into each bone's rest axes.
     def pose(rotations, lift):
@@ -291,16 +310,7 @@ def motions(rig):
              "tail": (-0.30, 0, 0.72)}
     action("Stumble", [(1, *running_pose(0.25)), (4, -0.058, recoil), (9, -0.116, catch),
                         (14, *running_pose(0.61)), (21, *running_pose(0.9))])
-    salute = {"spine": (-0.08, -0.09, -0.10), "head": (-0.10, 0.10, 0.16),
-              "upperArm.L": (-2.27, 0.31, -0.04), "upperArm.R": (-1.72, -0.32, 0.12),
-              "forearm.L": -0.38, "forearm.R": -0.82, "thigh.L": -0.57, "thigh.R": 0.23,
-              "shin.L": 0.71, "shin.R": 0.48, "ear.L": (-0.13, 0.14, 0.07),
-              "ear.R": (-0.19, -0.18, -0.02), "tail": (-0.2, 0, 0.34)}
-    action("Finish", [(1, *running_pose(0.15)), (5, -0.10, compress),
-                      (13, 0.23, salute), (18, 0.16, salute), (24, -0.10, compress),
-                      (32, 0, {"upperArm.L": (-1.63, 0.38, 0.08), "forearm.L": -0.69,
-                               "ear.R": (-0.05, -0.18, -0.14), "tailTip": (0.04, 0, -0.31)}),
-                      (38, 0, {"upperArm.L": (-1.88, 0.21, 0.20), "forearm.L": -0.49}), (53, 0, {})])
+    action("Finish", finish_keys())
     lift, throw = running_pose(0.35)
     throw.update({"spine": (0.28, -0.23, 0.31), "head": (-0.15, 0.09, -0.16),
                   "upperArm.R": (-1.42, -0.40, 0.07), "forearm.R": -0.21,

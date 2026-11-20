@@ -44,6 +44,7 @@ namespace RidgeRelay
         private readonly List<Mesh> ownedMeshes = new List<Mesh>();
         private Material stone, sandstone, inset, bright, rail, teal, metal, hazard, water, ripple;
         private Material redCliff, mauveCliff, sandCliff, green, timber, fabric, guide, pad, gold, tunnelStone;
+        private Material boardwalk, ridgeSlate;
         private bool built;
 
         public static TrackPose Sample(float distance, float lateral = 0)
@@ -82,7 +83,7 @@ namespace RidgeRelay
         private static TrackPose[] CreatePath()
         {
             var result = new TrackPose[Mathf.RoundToInt((End - Start) / Spacing) + 1];
-            Vector3 position = new Vector3(0, 0, Start);
+            Vector3 position = new Vector3(0, 12, Start);
             for (int i = 0; i < result.Length; i++)
             {
                 float s = Start + i * Spacing;
@@ -102,19 +103,27 @@ namespace RidgeRelay
         private static Vector3 Tangent(float s)
         {
             float yaw = Heading(s);
-            float pitch = 0.115f * Mathf.Sin(s * 0.047f) + 0.085f * Mathf.Sin(s * 0.098f);
-            if (s > CrestStart && s < CrestEnd)
-            {
-                float phase = (s - CrestStart) / (CrestEnd - CrestStart);
-                pitch += 0.24f * Mathf.Sin(phase * 2 * Mathf.PI) - 0.06f * Mathf.Sin(phase * Mathf.PI);
-            }
+            float pitch = 0.025f * Mathf.Sin(s * 0.047f);
+            // A river descent, ridge climb, and final valley each return smoothly to level.
+            pitch += Grade(s, 35, 225, -0.30f);
+            pitch += Grade(s, 245, CrestEnd, 0.36f);
+            pitch += Grade(s, 488, 630, -0.32f);
             return new Vector3(Mathf.Sin(yaw) * Mathf.Cos(pitch), Mathf.Sin(pitch), Mathf.Cos(yaw) * Mathf.Cos(pitch));
+        }
+
+        private static float Grade(float distance, float start, float end, float amplitude)
+        {
+            if (distance <= start || distance >= end) return 0;
+            return amplitude * Mathf.Sin((distance - start) / (end - start) * Mathf.PI * 2);
         }
 
         private static float Heading(float s)
         {
             float entry = Mathf.SmoothStep(0, 1, (s - 26) / 52);
-            return entry * (0.67f * Mathf.Sin((s - 41) * 0.029f) + 0.24f * Mathf.Sin(s * 0.057f));
+            float switchback = s > 490 && s < 630
+                ? 0.90f * Mathf.Sin((s - 490) * (2 * Mathf.PI / 140)) : 0;
+            return entry * (1.05f * Mathf.Sin((s - 41) * 0.029f) + 0.30f * Mathf.Sin(s * 0.057f)) +
+                switchback;
         }
 
         public void Build()
@@ -123,8 +132,10 @@ namespace RidgeRelay
             built = true;
             CreatePalette();
             BuildCourse();
+            BuildFinishTerrace();
             BuildTunnel();
             BuildEnvironment();
+            BuildCourseLandmarks();
             BuildFeatures();
         }
 
@@ -150,6 +161,82 @@ namespace RidgeRelay
             pad = MaterialFor("Bristle orange", 0xff7940, true);
             gold = MaterialFor("Gold route markers", 0xffbb53, true);
             tunnelStone = MaterialFor("Tunnel interior sandstone", 0xa86b61);
+            boardwalk = MaterialFor("River bridge cedar", 0x926750);
+            ridgeSlate = MaterialFor("High ridge slate", 0x616b81);
+        }
+
+        public static TrackPose FinishPose(int place) =>
+            Sample(RaceSimulation.CourseLength + 8, (5 + (place - 1) * 1.6f) / RaceSimulation.LaneWidth);
+
+        private void BuildFinishTerrace()
+        {
+            var terrace = new Batch();
+            float line = RaceSimulation.CourseLength;
+            Strip(terrace, boardwalk, line + 3, line + 14, 3, 11.2f, 0);
+            for (float s = line + 3; s < line + 14; s += 0.5f)
+                Strip(terrace, timber, s, s + 0.025f, 3, 11.2f, 0.01f);
+            for (int place = 1; place <= RaceSimulation.Entrants; place++)
+            {
+                float across = 5 + (place - 1) * 1.6f;
+                Strip(terrace, place == 1 ? gold : guide, line + 7.5f, line + 8.5f,
+                    across - 0.55f, across + 0.55f, 0.025f);
+            }
+            for (float s = line + 3; s <= line + 14; s += 2.75f)
+            {
+                TrackPose pose = Sample(s, 11.1f / RaceSimulation.LaneWidth);
+                AddBox(terrace, timber, pose, 0, 0.45f, 0, 0.18f, 0.9f, 0.18f);
+                AddBox(terrace, teal, pose, 0, 0.95f, 0, 0.29f, 0.12f, 0.29f);
+                Vector3 top = pose.Position;
+                float height = top.y + 10.5f;
+                AddWorldBox(terrace, stone, top - Vector3.up * height * 0.5f,
+                    pose.Forward, 0.6f, height, 0.6f);
+            }
+            Emit("Finish celebration terrace", terrace);
+        }
+
+        private void BuildCourseLandmarks()
+        {
+            var bridge = new Batch();
+            for (float s = 120; s <= 236; s += 8)
+            {
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    TrackPose p = Sample(s, side);
+                    AddBox(bridge, timber, p, side * 1.1f, 0.63f, 0, 0.27f, 1.26f, 0.29f);
+                    AddBox(bridge, guide, p, side * 1.1f, 1.3f, 0, 0.33f, 0.10f, 0.36f);
+                }
+            }
+            Emit("Cedar bridge lanterns", bridge);
+
+            var river = new Batch();
+            for (float s = 112; s < 175; s += 5)
+            {
+                TrackPose p = Sample(s);
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    Vector3 bank = p.Offset(side * 6, 0);
+                    bank.y = -8.55f;
+                    AddWorldBox(river, ripple, bank, p.Forward, 5, 0.04f, 0.38f);
+                    Vector3 support = p.Offset(side * 2.8f, 0);
+                    float top = p.Position.y - 0.4f;
+                    support.y = (top - 8.7f) * 0.5f;
+                    AddWorldBox(river, timber, support, p.Forward, 0.35f,
+                        Mathf.Max(0.3f, top + 8.7f), 0.45f);
+                }
+            }
+            Emit("River rapids and trestle supports", river);
+
+            var ridge = new Batch();
+            for (float s = 495; s <= 631; s += 16)
+            {
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    TrackPose p = Sample(s, side);
+                    AddBox(ridge, ridgeSlate, p, side * 1.38f, 0.9f, 0, 0.6f, 1.8f, 0.66f);
+                    AddBox(ridge, gold, p, side * 1.38f, 1.55f, 0, 0.66f, 0.18f, 0.72f);
+                }
+            }
+            Emit("High ridge beacons", ridge);
         }
 
         private Material MaterialFor(string materialName, int packedColor, bool emission = false)
@@ -249,7 +336,12 @@ namespace RidgeRelay
                 }
 
                 Material paving = Mathf.FloorToInt((a + 14) * 0.5f + lane) % 3 == 0 ? stone : sandstone;
+                if (a >= 118 && a < 236) paving = boardwalk;
+                else if (a >= 492 && a < 632) paving = ridgeSlate;
                 Strip(batch, paving, a, b, left, right, 0);
+                if (paving == boardwalk)
+                    for (float plank = a + 0.28f; plank + 0.025f < b; plank += 0.42f)
+                        Strip(batch, timber, plank, plank + 0.025f, left, right, 0.012f);
                 if (lane < 1 && !GapAt((a + b) * 0.5f, lane + 1))
                 {
                     Strip(batch, inset, a, b, right - 0.023f, right + 0.023f, 0.008f);
@@ -447,11 +539,13 @@ namespace RidgeRelay
                     {
                         float tunnelMargin = s > RaceSimulation.TunnelLockStart - 4 &&
                             s < RaceSimulation.TunnelLockEnd + 4 ? 4 : 0;
-                        float x = side * (8 + tunnelMargin + Range(random, 0, 11));
+                        float riverMargin = s >= 90 && s <= 225 ? 7 : 0;
+                        float x = side * (8 + tunnelMargin + riverMargin + Range(random, 0, 11));
                         Vector3 basePoint = p.Offset(x, 0, Range(random, -3, 3));
                         basePoint.y = -9.8f;
                         float width = Range(random, 5, 10);
                         float height = Range(random, 7, 13);
+                        basePoint = ClearRoad(basePoint, width * 0.6f, height + 1, p.Right * side);
                         AddRock(sector, sandCliff, redCliff, basePoint, width, height, random);
                         if (cliffModel != null && ((int)s + side) % 3 == 0)
                         {
@@ -462,7 +556,10 @@ namespace RidgeRelay
 
                         Vector3 backdrop = p.Offset(side * Range(random, 23, 40), 0, Range(random, -7, 7));
                         backdrop.y = -10;
-                        AddRock(sector, mauveCliff, redCliff, backdrop, Range(random, 11, 19), Range(random, 15, 23), random);
+                        float backdropWidth = Range(random, 11, 19);
+                        float backdropHeight = Range(random, 15, 23);
+                        backdrop = ClearRoad(backdrop, backdropWidth * 0.6f, backdropHeight, p.Right * side);
+                        AddRock(sector, mauveCliff, redCliff, backdrop, backdropWidth, backdropHeight, random);
 
                         Vector3 splash = basePoint + p.Right * (-side * (width * 0.45f + 0.32f));
                         splash.y = -8.68f;
@@ -486,6 +583,36 @@ namespace RidgeRelay
                 Vector3 building = p.Offset(i % 2 == 0 ? -7.3f : 7.3f, -0.4f);
                 AddWindmill(building, p.Forward, millModel);
             }
+        }
+
+        private static Vector3 ClearRoad(Vector3 origin, float radius, float height, Vector3 outward)
+        {
+            // A rock beside one bend can otherwise occupy a different part of the road.
+            float clearance = radius + DeckHalfWidth + 0.75f;
+            outward.y = 0;
+            outward.Normalize();
+            for (int attempt = 0; attempt < 16; attempt++)
+            {
+                bool overlaps = false;
+                for (int i = 0; i < Path.Length; i += 4)
+                {
+                    Vector3 road = Path[i].Position;
+                    if (road.y + 2.2f < origin.y || road.y - 0.6f > origin.y + height) continue;
+                    float dx = road.x - origin.x;
+                    float dz = road.z - origin.z;
+                    float corridor = Start + i * Spacing >= RaceSimulation.CourseLength - 6
+                        ? radius + 17 : clearance;
+                    if (dx * dx + dz * dz >= corridor * corridor) continue;
+                    overlaps = true;
+                    break;
+                }
+                if (!overlaps) return origin;
+                origin += outward * 4;
+            }
+            // Dense switchbacks can exhaust nearby space. The outer bound is always clear.
+            foreach (TrackPose pose in Path)
+                origin.x = Mathf.Max(origin.x, pose.Position.x + clearance + 1);
+            return origin;
         }
 
         private void AddWindmill(Vector3 origin, Vector3 forward, GameObject model)

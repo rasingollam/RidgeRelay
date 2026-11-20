@@ -21,6 +21,8 @@ namespace RidgeRelay
         private float bestTime;
         private bool snapCamera;
         private bool displayingOnline;
+        private float cameraShoulder;
+        private float shoulderTarget;
 
         private void Awake()
         {
@@ -43,6 +45,7 @@ namespace RidgeRelay
             sun.transform.rotation = Quaternion.Euler(48, -38, 0);
 
             chase = new GameObject("Chase camera").AddComponent<Camera>();
+            chase.tag = "MainCamera";
             chase.gameObject.AddComponent<AudioListener>();
             chase.clearFlags = CameraClearFlags.SolidColor;
             chase.backgroundColor = new Color(0.56f, 0.71f, 0.91f);
@@ -74,7 +77,7 @@ namespace RidgeRelay
         private void StartRace()
         {
             if (online.Connected || online.Busy) return;
-            race = new RaceSimulation();
+            race = new RaceSimulation(waitForAll: true, relaxedBots: true);
             accumulator = 0;
             snapCamera = true;
             audioFeedback.ResetRace();
@@ -162,11 +165,36 @@ namespace RidgeRelay
             foreach (RunnerView view in views) view.SetPaused(paused);
             if (paused) return;
             RaceSimulation visible = (displayingOnline ? online.DisplayRace : race) ?? preview;
-            ShowRunners(visible);
             int slot = displayingOnline ? Mathf.Clamp(online.LocalSlot, 0, RaceSimulation.Entrants - 1) : 0;
+            ShowRunners(visible);
+            for (int i = 0; i < views.Length; i++) views[i].MarkLocal(i == slot);
             track.UpdateVisuals(visible, slot);
             effects.Present(visible == preview ? null : visible, slot, hud.ReducedMotion);
             RunnerState player = visible.Runners[slot];
+            if (player.FinishTime >= 0)
+            {
+                MoveFinishCamera(snapCamera);
+                snapCamera = false;
+                return;
+            }
+            float nearest = float.PositiveInfinity;
+            int closeRival = -1;
+            for (int i = 0; i < views.Length; i++)
+            {
+                RunnerState rival = visible.Runners[i];
+                float separation = Mathf.Abs(rival.Distance - player.Distance);
+                if (i != slot && rival.Recovery <= 0 && rival.FinishTime < 0 && separation < 4 &&
+                    separation < nearest && Mathf.Abs(rival.Lateral - player.Lateral) < 1.2f)
+                {
+                    nearest = separation;
+                    closeRival = i;
+                }
+            }
+            if (closeRival < 0) shoulderTarget = 0;
+            else if (Mathf.Abs(shoulderTarget) < 0.1f)
+                shoulderTarget = visible.Runners[closeRival].Lateral > player.Lateral ? -1.25f : 1.25f;
+            cameraShoulder = Mathf.Lerp(cameraShoulder, shoulderTarget,
+                1 - Mathf.Exp(-4 * Time.deltaTime));
             MoveCamera(player, snapCamera || player.Recovery >= 0.84f);
             snapCamera = false;
         }
@@ -187,10 +215,12 @@ namespace RidgeRelay
             var ahead = TrackView.Sample(runner.Distance + Mathf.Lerp(8f, 5f, tunnel),
                 runner.Lateral * Mathf.Lerp(0.12f, 1f, tunnel));
             Vector3 targetPosition = rear.Position;
+            targetPosition += rear.Right * cameraShoulder * (1 - tunnel);
             targetPosition.y = Mathf.Max(rear.Position.y + Mathf.Lerp(2.5f, 1.9f, tunnel),
                 anchor.Position.y + Mathf.Lerp(1.8f, 1.3f, tunnel));
             targetPosition.y += runner.Height * 0.16f * (1 - tunnel);
-            Vector3 aim = ahead.Position + Vector3.up * 0.8f;
+            Vector3 aim = Vector3.Lerp(ahead.Position, anchor.Position,
+                Mathf.Abs(cameraShoulder) * 0.13f) + Vector3.up * 0.8f;
             float blend = snap ? 1 : 1 - Mathf.Exp(-14 * Time.deltaTime);
             chase.transform.position = Vector3.Lerp(chase.transform.position, targetPosition, blend);
             Quaternion heading = Quaternion.LookRotation(aim - chase.transform.position, Vector3.up);
@@ -199,6 +229,18 @@ namespace RidgeRelay
                 runner.Slipstream >= RaceSimulation.SlipstreamActiveThreshold;
             float fov = !hud.ReducedMotion && accelerating ? Mathf.Lerp(59, 55, tunnel) : 55;
             chase.fieldOfView = Mathf.Lerp(chase.fieldOfView, fov, blend);
+        }
+
+        private void MoveFinishCamera(bool snap)
+        {
+            TrackPose finish = TrackView.Sample(RaceSimulation.CourseLength + 7);
+            Vector3 position = finish.Offset(13.8f, 4.1f, -7);
+            Vector3 aim = finish.Offset(5.2f, 1.0f, -0.5f);
+            float blend = snap ? 1 : 1 - Mathf.Exp(-2.8f * Time.deltaTime);
+            chase.transform.position = Vector3.Lerp(chase.transform.position, position, blend);
+            chase.transform.rotation = Quaternion.Slerp(chase.transform.rotation,
+                Quaternion.LookRotation(aim - chase.transform.position, Vector3.up), blend);
+            chase.fieldOfView = Mathf.Lerp(chase.fieldOfView, 57, blend);
         }
     }
 }

@@ -13,12 +13,12 @@ namespace RidgeRelay
 {
     public sealed class PrivateRaceSession : MonoBehaviour
     {
-        private const string SessionType = "ridge-relay-race-v2";
-        private const string HelloMessage = "ridge-relay/v2/hello";
-        private const string SeatsMessage = "ridge-relay/v2/seats";
-        private const string InputMessage = "ridge-relay/v2/input";
-        private const string StateMessage = "ridge-relay/v2/state";
-        private const byte ProtocolVersion = 2;
+        private const string SessionType = "ridge-relay-race-v5";
+        private const string HelloMessage = "ridge-relay/v5/hello";
+        private const string SeatsMessage = "ridge-relay/v5/seats";
+        private const string InputMessage = "ridge-relay/v5/input";
+        private const string StateMessage = "ridge-relay/v5/state";
+        private const byte ProtocolVersion = 5;
         private const int SnapshotInterval = 3;
         private const int InputBytes = 2 * sizeof(int) + 1;
         private const int MaxQueuedInputs = 8;

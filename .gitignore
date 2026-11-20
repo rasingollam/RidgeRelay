@@ -4,6 +4,7 @@
 /Logs/
 /UserSettings/
 /Builds/
+/build/
 /.tools/
 /.utmp/
 *.apk
