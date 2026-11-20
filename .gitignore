@@ -5,5 +5,7 @@
 /UserSettings/
 /Builds/
 /.tools/
+/.utmp/
+*.apk
 __pycache__/
 *.blend1

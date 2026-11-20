@@ -7,8 +7,8 @@ namespace RidgeRelay
     internal sealed class RaceStatePacket
     {
         private const int MaxTraps = 32;
-        private const int RunnerBytes = 3 + 9 * sizeof(float);
-        private const int HeaderBytes = 4 * sizeof(int) + 2;
+        private const int RunnerBytes = 10 + sizeof(uint) + 13 * sizeof(float);
+        private const int HeaderBytes = 3 * sizeof(int) + 2;
         private const int TrapBytes = 2 + 2 * sizeof(float);
         internal const int Capacity = HeaderBytes + RunnerBytes * RaceSimulation.Entrants + TrapBytes * MaxTraps;
 
@@ -16,21 +16,15 @@ namespace RidgeRelay
         internal int Tick;
         internal int AcknowledgedInput;
         internal RacePhase Phase;
-        private uint readyMask;
         private readonly RunnerPacket[] runners = new RunnerPacket[RaceSimulation.Entrants];
         private readonly List<RaceSimulation.Trap> traps = new List<RaceSimulation.Trap>(MaxTraps);
 
         internal static void Write(FastBufferWriter writer, RaceSimulation race, int match, int ack)
         {
-            uint pickups = 0;
-            for (int i = 0; i < RaceSimulation.Features.Count; ++i)
-                if (race.IsPickupReady(i)) pickups |= 1u << i;
-
             int trapCount = Mathf.Min(race.Traps.Count, MaxTraps);
             writer.WriteValueSafe(match);
             writer.WriteValueSafe(race.SimulationTick);
             writer.WriteValueSafe(ack);
-            writer.WriteValueSafe(pickups);
             writer.WriteValueSafe((byte)race.Phase);
             writer.WriteValueSafe((byte)trapCount);
             foreach (RunnerState runner in race.Runners) new RunnerPacket(runner).Write(writer);
@@ -50,7 +44,6 @@ namespace RidgeRelay
             reader.ReadValue(out Match);
             reader.ReadValue(out Tick);
             reader.ReadValue(out AcknowledgedInput);
-            reader.ReadValue(out readyMask);
             reader.ReadValue(out byte phase);
             reader.ReadValue(out byte trapCount);
             if (Match <= 0 || Tick < -180 || Tick > 60 * 125 || AcknowledgedInput < 0 ||
@@ -77,7 +70,7 @@ namespace RidgeRelay
 
         internal void Present(RaceSimulation display, RaceStatePacket previous, float fraction)
         {
-            display.ApplyNetworkState(Tick, Phase, readyMask, traps);
+            display.ApplyNetworkState(Tick, Phase, traps);
             for (int i = 0; i < runners.Length; ++i)
             {
                 RunnerPacket current = runners[i];
@@ -92,9 +85,12 @@ namespace RidgeRelay
 
         private struct RunnerPacket
         {
-            private byte lane, held, place;
+            private byte lane, held, place, pulseLane, pulseOwner;
+            private byte pulseHits, pulseDodges, pulseBlocks, shortcutClears, shortcutFalls;
+            private uint pickupMask;
             internal float Distance;
             private float lateral, height, finish, shield, boost, slow, recovery, immunity;
+            private float slipstream, pulseWarning, itemCooldown, routeBoost;
 
             internal RunnerPacket(RunnerState runner)
             {
@@ -110,6 +106,18 @@ namespace RidgeRelay
                 slow = runner.Slow;
                 recovery = runner.Recovery;
                 immunity = runner.Immunity;
+                pickupMask = runner.PickupMask;
+                slipstream = runner.Slipstream;
+                pulseWarning = runner.PulseWarning;
+                pulseLane = (byte)(runner.PulseLane + 1);
+                pulseOwner = (byte)(runner.PulseOwner + 1);
+                itemCooldown = runner.ItemCooldown;
+                routeBoost = runner.RouteBoost;
+                pulseHits = (byte)Mathf.Min(byte.MaxValue, runner.PulseHits);
+                pulseDodges = (byte)Mathf.Min(byte.MaxValue, runner.PulseDodges);
+                pulseBlocks = (byte)Mathf.Min(byte.MaxValue, runner.PulseBlocks);
+                shortcutClears = (byte)Mathf.Min(byte.MaxValue, runner.ShortcutClears);
+                shortcutFalls = (byte)Mathf.Min(byte.MaxValue, runner.ShortcutFalls);
             }
 
             internal void Write(FastBufferWriter writer)
@@ -126,6 +134,18 @@ namespace RidgeRelay
                 writer.WriteValueSafe(slow);
                 writer.WriteValueSafe(recovery);
                 writer.WriteValueSafe(immunity);
+                writer.WriteValueSafe(pickupMask);
+                writer.WriteValueSafe(slipstream);
+                writer.WriteValueSafe(pulseWarning);
+                writer.WriteValueSafe(pulseLane);
+                writer.WriteValueSafe(pulseOwner);
+                writer.WriteValueSafe(itemCooldown);
+                writer.WriteValueSafe(routeBoost);
+                writer.WriteValueSafe(pulseHits);
+                writer.WriteValueSafe(pulseDodges);
+                writer.WriteValueSafe(pulseBlocks);
+                writer.WriteValueSafe(shortcutClears);
+                writer.WriteValueSafe(shortcutFalls);
             }
 
             internal bool TryRead(ref FastBufferReader reader)
@@ -142,7 +162,22 @@ namespace RidgeRelay
                 reader.ReadValue(out slow);
                 reader.ReadValue(out recovery);
                 reader.ReadValue(out immunity);
-                return lane <= 2 && held <= (byte)Gadget.ShellFilm &&
+                reader.ReadValue(out pickupMask);
+                reader.ReadValue(out slipstream);
+                reader.ReadValue(out pulseWarning);
+                reader.ReadValue(out pulseLane);
+                reader.ReadValue(out pulseOwner);
+                reader.ReadValue(out itemCooldown);
+                reader.ReadValue(out routeBoost);
+                reader.ReadValue(out pulseHits);
+                reader.ReadValue(out pulseDodges);
+                reader.ReadValue(out pulseBlocks);
+                reader.ReadValue(out shortcutClears);
+                reader.ReadValue(out shortcutFalls);
+                return lane <= 2 && held <= (byte)Gadget.PulseShot &&
+                    pulseLane <= 2 && pulseOwner <= RaceSimulation.Entrants &&
+                    InRange(slipstream, 0, 1) && InRange(pulseWarning, 0, 0.65f) &&
+                    InRange(itemCooldown, 0, 1.2f) && InRange(routeBoost, 0, 2.4f) &&
                     place >= 1 && place <= RaceSimulation.Entrants &&
                     InRange(lateral, -1.01f, 1.01f) && InRange(Distance, -2, RaceSimulation.CourseLength) &&
                     InRange(height, 0, 3) && InRange(finish, -1, 125) &&
@@ -164,6 +199,18 @@ namespace RidgeRelay
                 runner.Slow = slow;
                 runner.Recovery = recovery;
                 runner.Immunity = immunity;
+                runner.PickupMask = pickupMask;
+                runner.Slipstream = slipstream;
+                runner.PulseWarning = pulseWarning;
+                runner.PulseLane = pulseLane - 1;
+                runner.PulseOwner = pulseOwner - 1;
+                runner.ItemCooldown = itemCooldown;
+                runner.RouteBoost = routeBoost;
+                runner.PulseHits = pulseHits;
+                runner.PulseDodges = pulseDodges;
+                runner.PulseBlocks = pulseBlocks;
+                runner.ShortcutClears = shortcutClears;
+                runner.ShortcutFalls = shortcutFalls;
             }
         }
     }

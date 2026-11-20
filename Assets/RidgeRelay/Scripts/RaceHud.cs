@@ -16,6 +16,7 @@ namespace RidgeRelay
         private static readonly Color Muted = new Color32(179, 207, 207, 255);
         private static readonly Color Mint = new Color32(119, 235, 194, 255);
         private static readonly Color Gold = new Color32(255, 190, 111, 255);
+        private static readonly Color Pressed = new Color32(255, 227, 166, 255);
         private static readonly Color Coral = new Color32(255, 151, 122, 255);
 
         private static readonly string[] CountLabels = { string.Empty, "1", "2", "3" };
@@ -47,6 +48,9 @@ namespace RidgeRelay
         private RectTransform playLayer;
         private RectTransform modalLayer;
         private RectTransform barFill;
+        private RectTransform draftCard;
+        private RectTransform draftFill;
+        private UnityEngine.UI.Text draftLabel;
         private Text place;
         private Text clock;
         private Text countdown;
@@ -56,8 +60,12 @@ namespace RidgeRelay
         private Control primary;
         private Control motion;
         private Control mirror;
-        private Control jump;
         private Control item;
+        private UnityEngine.UI.Text itemHint;
+        private Gadget previousHeld;
+        private string pickupNotice;
+        private float pickupNoticeUntil;
+        private float itemPressedUntil;
         private Font font;
         private Sprite rounded;
         private Texture2D roundedTexture;
@@ -72,6 +80,13 @@ namespace RidgeRelay
         private int lastDecisecond = -1;
         private int lastPlace = -1;
         private bool pauseMenu;
+        private RunnerState feedbackRunner;
+        private int pulseHits;
+        private int pulseDodges;
+        private int pulseBlocks;
+        private int shortcutClears;
+        private float outcomeUntil;
+        private string outcomeText;
 
         public event Action StartRequested;
         public event Action RetryRequested;
@@ -114,6 +129,8 @@ namespace RidgeRelay
             if (nextRace != race)
             {
                 pauseMenu = false;
+                feedbackRunner = null;
+                itemPressedUntil = 0;
                 ClearInput();
                 lastDecisecond = lastPlace = -1;
             }
@@ -152,8 +169,9 @@ namespace RidgeRelay
                         Shift(-1);
                     if (keyboard.rightArrowKey.wasPressedThisFrame || keyboard.dKey.wasPressedThisFrame)
                         Shift(1);
-                    jumpPending |= keyboard.spaceKey.wasPressedThisFrame || keyboard.wKey.wasPressedThisFrame;
-                    itemPending |= keyboard.eKey.wasPressedThisFrame;
+                    jumpPending |= keyboard.spaceKey.wasPressedThisFrame || keyboard.wKey.wasPressedThisFrame ||
+                        keyboard.upArrowKey.wasPressedThisFrame;
+                    if (keyboard.eKey.wasPressedThisFrame) QueueItemUse();
                 }
             }
 
@@ -197,9 +215,13 @@ namespace RidgeRelay
             {
                 Vector2 offset = position - gesture.Origin;
                 float threshold = Mathf.Max(16, Screen.height * 0.065f);
-                if (Mathf.Abs(offset.x) >= threshold && Mathf.Abs(offset.x) > Mathf.Abs(offset.y) * 1.15f)
+                bool laneSwipe = Mathf.Abs(offset.x) >= threshold &&
+                    Mathf.Abs(offset.x) > Mathf.Abs(offset.y) * 1.15f;
+                bool jumpSwipe = offset.y >= threshold && offset.y > Mathf.Abs(offset.x) * 1.15f;
+                if (laneSwipe || jumpSwipe)
                 {
-                    Shift(Math.Sign(offset.x));
+                    if (laneSwipe) Shift(Math.Sign(offset.x));
+                    jumpPending |= jumpSwipe;
                     gesture.Consumed = true;
                     gestures[id] = gesture;
                 }
@@ -221,6 +243,13 @@ namespace RidgeRelay
         }
 
         private void Shift(int direction) => lanePending = Mathf.Clamp(lanePending + direction, -2, 2);
+
+        private void QueueItemUse()
+        {
+            if (!CanControlRace || race.Runners[PlayerSlot].Held == Gadget.None) return;
+            itemPending = true;
+            itemPressedUntil = Time.unscaledTime + 0.18f;
+        }
 
         private void ClearInput()
         {
@@ -284,7 +313,7 @@ namespace RidgeRelay
             bool dnf = finished && runner.FinishTime < 0;
             modalTitle.text = menu ? "RIDGE RELAY" : finished ? (dnf ? "DNF" : Ordinal(runner.Place) + " PLACE") : "PAUSED";
             if (menu)
-                modalBody.text = record + "\nSwipe to change lanes. Tap JUMP or use your held gadget.\nKeyboard: A / D, Space, E";
+                modalBody.text = record + "\nSwipe sideways to steer. Swipe up to jump.\nTap gadget to use. Keyboard: A / D, Up or Space, E";
             else if (finished)
             {
                 string finish = dnf ? "TIME LIMIT REACHED" : "TIME  " + FormatTime(runner.FinishTime);
@@ -321,19 +350,86 @@ namespace RidgeRelay
                 ? CountLabels[Mathf.Clamp(Mathf.CeilToInt(-race.Clock), 1, 3)]
                 : race.Clock < 0.65f ? "GO!" : string.Empty;
 
-            string gadget = GadgetName(runner.Held);
-            if (item.Label.text != gadget) item.Label.text = gadget;
-            item.Background.color = runner.Held == Gadget.None ? Panel : Gold;
-            item.Label.color = runner.Held == Gadget.None ? Muted : Ink;
+            bool pulseNeedsTarget = runner.Held == Gadget.PulseShot && !race.HasPulseTarget(PlayerSlot);
+            string gadget = pulseNeedsTarget ? "PULSE SHOT · LINE UP" : GadgetName(runner.Held);
+            bool itemReady = runner.Held != Gadget.None && runner.ItemCooldown <= 0 && !pulseNeedsTarget;
+            bool itemPressed = Time.unscaledTime < itemPressedUntil;
+            bool lightButton = itemPressed || itemReady;
+            item.Label.text = gadget;
+            itemHint.text = GadgetHint(runner.Held);
+            item.Background.color = itemPressed ? Pressed : itemReady ? Gold : Panel;
+            item.Label.color = lightButton ? Ink : runner.Held != Gadget.None ? Paper : Muted;
+            itemHint.color = lightButton ? Ink : Muted;
+            RefreshCompetitiveCues(runner);
 
             if (runner.FinishTime >= 0) SetNotice("FINISHED / WAITING FOR RACERS", Mint);
             else if (runner.Recovery > 0) SetNotice("BACK ON COURSE", Gold);
+            else if (runner.PulseWarning > 0)
+                SetNotice(PulseNotice(runner.PulseLane - runner.Lane), Coral);
             else if (TryFindTrap(runner, out int warningLane))
                 SetNotice(warningLane == 0 ? "▲  BRISTLES AHEAD" : warningLane < 0 ? "◀  BRISTLES LEFT" : "BRISTLES RIGHT  ▶", Coral);
+            else if (race.Clock < outcomeUntil) SetNotice(outcomeText, Mint);
+            else if (race.Clock < pickupNoticeUntil) SetNotice(pickupNotice, Gold);
             else if (runner.Slow > 0) SetNotice("SLOWED", Coral);
+            else if (runner.RouteBoost > 0) SetNotice("SHORTCUT BOOST", Mint);
             else if (runner.Shield > 0) SetNotice("SHIELD ACTIVE", Mint);
             else if (runner.Boost > 0) SetNotice("TAILWIND ACTIVE", Mint);
             else SetNotice(string.Empty, Muted);
+        }
+
+        private void RefreshCompetitiveCues(RunnerState runner)
+        {
+            bool draftVisible = runner.Slipstream > 0 && runner.FinishTime < 0 && runner.Recovery <= 0;
+            draftCard.gameObject.SetActive(draftVisible);
+            if (draftVisible)
+            {
+                bool active = runner.Slipstream >= RaceSimulation.SlipstreamActiveThreshold;
+                draftFill.anchorMax = new Vector2(Mathf.Clamp01(runner.Slipstream), 1);
+                draftLabel.text = active ? "SLIPSTREAM BOOST" : "DRAFTING";
+                draftLabel.color = active ? Mint : Paper;
+            }
+
+            if (!ReferenceEquals(feedbackRunner, runner))
+            {
+                feedbackRunner = runner;
+                outcomeUntil = pickupNoticeUntil = float.NegativeInfinity;
+            }
+            else
+            {
+                if (runner.Held != previousHeld)
+                {
+                    pickupNoticeUntil = float.NegativeInfinity;
+                    if (runner.Held != Gadget.None)
+                    {
+                        pickupNotice = "PICKED UP " + GadgetName(runner.Held);
+                        pickupNoticeUntil = race.Clock + 1.2f;
+                    }
+                }
+
+                string outcome = null;
+                if (runner.PulseBlocks > pulseBlocks) outcome = "SHIELD BLOCKED PULSE";
+                else if (runner.PulseDodges > pulseDodges) outcome = "PULSE DODGED";
+                else if (runner.PulseHits > pulseHits) outcome = "PULSE HIT";
+                else if (runner.ShortcutClears > shortcutClears) outcome = "SHORTCUT CLEARED";
+                if (outcome != null)
+                {
+                    outcomeText = outcome;
+                    outcomeUntil = race.Clock + 1.25f;
+                }
+            }
+
+            previousHeld = runner.Held;
+            pulseBlocks = runner.PulseBlocks;
+            pulseDodges = runner.PulseDodges;
+            pulseHits = runner.PulseHits;
+            shortcutClears = runner.ShortcutClears;
+        }
+
+        private static string PulseNotice(int laneDelta)
+        {
+            if (laneDelta < 0) return "◀  PULSE LEFT";
+            if (laneDelta > 0) return "PULSE RIGHT  ▶";
+            return "PULSE INCOMING  /  MOVE OR JUMP";
         }
 
         private bool TryFindTrap(RunnerState runner, out int laneDelta)
@@ -399,18 +495,34 @@ namespace RidgeRelay
             barFill = Fill(progress, "Progress Fill");
             AddPanel(barFill, Mint);
 
+            draftCard = Spot(playLayer, "Draft Meter", new Vector2(0.5f, 1),
+                new Vector2(0, -106), new Vector2(190, 32));
+            AddPanel(draftCard, Panel);
+            draftLabel = AddText(Spot(draftCard, "Draft Status", new Vector2(0.5f, 0.5f),
+                new Vector2(0, 3), new Vector2(180, 24)), "DRAFTING", 15, Paper, FontStyle.Bold);
+            RectTransform draftTrack = Spot(draftCard, "Draft Track", new Vector2(0.5f, 0),
+                new Vector2(0, 5), new Vector2(164, 4));
+            AddPanel(draftTrack, new Color32(64, 92, 101, 255));
+            draftFill = Fill(draftTrack, "Draft Fill");
+            AddPanel(draftFill, Mint);
+            draftCard.gameObject.SetActive(false);
+
             AddControl(playLayer, "Pause", "PAUSE", new Vector2(1, 1),
                 new Vector2(-69, -50), new Vector2(98, 56), Panel, Paper, 18, TogglePause);
             countdown = AddText(Spot(playLayer, "Countdown", new Vector2(0.5f, 0.57f),
                 Vector2.zero, new Vector2(320, 142)), string.Empty, 94, Paper, FontStyle.Bold);
             AddOutline(countdown, Ink, new Vector2(3, -3));
-            notice = AddText(Spot(playLayer, "Status", new Vector2(0.5f, 0.14f),
-                Vector2.zero, new Vector2(368, 42)), string.Empty, 23, Mint, FontStyle.Bold);
+            notice = AddText(Spot(playLayer, "Status", new Vector2(0.5f, 0.20f),
+                Vector2.zero, new Vector2(450, 42)), string.Empty, 23, Mint, FontStyle.Bold);
             AddOutline(notice, Ink, new Vector2(2, -2));
-            jump = AddControl(playLayer, "Jump", "JUMP", Vector2.zero, new Vector2(102, 65),
-                new Vector2(164, 88), Panel, Paper, 26, () => { if (CanControlRace) jumpPending = true; });
-            item = AddControl(playLayer, "Gadget", "GADGET", Vector2.right, new Vector2(-102, 65),
-                new Vector2(164, 88), Panel, Muted, 21, () => { if (CanControlRace) itemPending = true; });
+            item = AddControl(playLayer, "Gadget", "GADGET", Vector2.right, new Vector2(-130, 59),
+                new Vector2(222, 88), Panel, Muted, 21, QueueItemUse);
+            RectTransform itemTitle = item.Label.rectTransform;
+            itemTitle.anchorMin = itemTitle.anchorMax = new Vector2(0.5f, 0.5f);
+            itemTitle.sizeDelta = new Vector2(210, 31);
+            itemTitle.anchoredPosition = new Vector2(0, 13);
+            itemHint = AddText(Spot(item.Rect, "Gadget Effect", new Vector2(0.5f, 0.5f),
+                new Vector2(0, -14), new Vector2(216, 26)), "Collect a pickup", 15, Muted, FontStyle.Bold);
 
             RectTransform card = Spot(modalSafe, "Menu Card", new Vector2(0.5f, 0.5f),
                 Vector2.zero, new Vector2(586, 366));
@@ -445,7 +557,6 @@ namespace RidgeRelay
 
         private void LayoutControls()
         {
-            MoveControl(jump, mirrored);
             MoveControl(item, !mirrored);
         }
 
@@ -453,7 +564,7 @@ namespace RidgeRelay
         {
             Vector2 anchor = onRight ? Vector2.right : Vector2.zero;
             control.Rect.anchorMin = control.Rect.anchorMax = anchor;
-            control.Rect.anchoredPosition = new Vector2(onRight ? -102 : 102, 65);
+            control.Rect.anchoredPosition = new Vector2(onRight ? -130 : 130, 59);
         }
 
         private Control AddControl(RectTransform parent, string name, string label, Vector2 anchor,
@@ -545,6 +656,18 @@ namespace RidgeRelay
             return rect;
         }
 
+        private static string GadgetHint(Gadget gadget)
+        {
+            switch (gadget)
+            {
+                case Gadget.Tailwind: return "Tap to sprint faster";
+                case Gadget.BristlePad: return "Tap to drop a slowing trap";
+                case Gadget.ShellFilm: return "Tap to block the next hit";
+                case Gadget.PulseShot: return "Tap to slow a rival ahead";
+                default: return "Collect a pickup";
+            }
+        }
+
         private static string GadgetName(Gadget gadget)
         {
             switch (gadget)
@@ -552,6 +675,7 @@ namespace RidgeRelay
                 case Gadget.Tailwind: return "TAILWIND";
                 case Gadget.BristlePad: return "BRISTLE PAD";
                 case Gadget.ShellFilm: return "SHELL FILM";
+                case Gadget.PulseShot: return "PULSE SHOT";
                 default: return "GADGET";
             }
         }

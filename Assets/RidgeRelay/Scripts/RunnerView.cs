@@ -14,7 +14,9 @@ namespace RidgeRelay
         };
 
         private readonly Transform root;
+        private readonly Transform facing;
         private readonly Animator animator;
+        private static readonly Quaternion ImportedFacing = Quaternion.Euler(0, 180, 0);
         private string animationState;
         private float previousHeight;
         private float previousSlow;
@@ -25,7 +27,12 @@ namespace RidgeRelay
             root = new GameObject(index == 0 ? "Player courier" : $"Courier {index + 1}").transform;
             if (Model != null)
             {
-                var model = Object.Instantiate(Model, root, false);
+                // The imported jerboa faces local -Z, while the track heading is +Z.
+                // Keep the correction above the animated model so clips cannot overwrite it.
+                facing = new GameObject("Model facing").transform;
+                facing.SetParent(root, false);
+                facing.localRotation = ImportedFacing;
+                var model = Object.Instantiate(Model, facing, false);
                 animator = model.GetComponent<Animator>();
                 if (animator == null) animator = model.AddComponent<Animator>();
                 animator.runtimeAnimatorController = Controller;
@@ -52,7 +59,7 @@ namespace RidgeRelay
             if (animator != null) animator.speed = paused ? 0 : 1;
         }
 
-        public void Show(RunnerState state, RacePhase phase)
+        public void Show(RunnerState state, RacePhase phase, bool reducedMotion)
         {
             var pose = TrackView.Sample(state.Distance, state.Lateral);
             root.SetPositionAndRotation(
@@ -63,6 +70,7 @@ namespace RidgeRelay
             {
                 animationState = null;
                 previousHeight = 0;
+                if (facing != null) facing.localRotation = ImportedFacing;
                 return;
             }
             if (animator == null || Controller == null) return;
@@ -92,6 +100,19 @@ namespace RidgeRelay
                 animator.CrossFadeInFixedTime(desired, 0.08f);
                 animationState = desired;
             }
+
+            bool accelerating = state.Boost > 0 || state.RouteBoost > 0 ||
+                state.Slipstream >= RaceSimulation.SlipstreamActiveThreshold;
+            float steering = phase == RacePhase.Running && state.FinishTime < 0
+                ? Mathf.Clamp((state.Lane - state.Lateral) * 1.65f, -1, 1) : 0;
+            float motion = reducedMotion ? 0.35f : 1f;
+            float pitch = desired == "Run" && accelerating ? 7 * motion : 0;
+            Quaternion lean = Quaternion.Euler(pitch, steering * 12 * motion, -steering * 16 * motion) *
+                ImportedFacing;
+            facing.localRotation = Quaternion.Slerp(facing.localRotation, lean,
+                1 - Mathf.Exp(-15 * Time.deltaTime));
+            if (desired == "Run")
+                animator.speed = state.Slow > 0 ? 0.76f : accelerating ? 1.22f : 1;
 
             previousHeight = state.Height;
             previousSlow = state.Slow;

@@ -1,9 +1,10 @@
 """Build Ridge Relay's editable runner source and Unity FBX export."""
+from math import acos, atan2, cos, hypot, pi, sin
 from pathlib import Path
 import sys
 
 import bpy
-from mathutils import Quaternion, Vector
+from mathutils import Euler, Vector
 
 ROOT = Path(__file__).resolve().parent.parent
 DEST = ROOT / "Assets/RidgeRelay/Art/Resources/RidgeRelay"
@@ -181,13 +182,15 @@ def build_palette_atlas(skin):
 
 
 def motions(rig):
-    # Rotation around the model's world X axis, expressed in each bone rest frame.
+    # Pose in model-space axes, then convert into each bone's rest axes.
     def pose(rotations, lift):
         for bone in rig.pose.bones:
             bone.rotation_mode = "QUATERNION"
-            angle = rotations.get(bone.name, 0)
+            angles = rotations.get(bone.name, 0)
+            if isinstance(angles, (int, float)):
+                angles = (angles, 0, 0)
             rest = bone.bone.matrix_local.to_quaternion()
-            bone.rotation_quaternion = rest.inverted() @ Quaternion((1, 0, 0), angle) @ rest
+            bone.rotation_quaternion = rest.inverted() @ Euler(angles).to_quaternion() @ rest
             bone.location = rest.inverted() @ Vector((0, 0, lift)) if bone.name == "hips" else (0, 0, 0)
 
     def action(name, keys):
@@ -204,48 +207,106 @@ def motions(rig):
 
     scene = bpy.context.scene
     scene.render.fps = 30
-    scene.frame_start, scene.frame_end = 1, 30
+    scene.frame_start, scene.frame_end = 1, 61
     idle = action("Idle", [
-        (1, 0, {}), (23, 0.014, {"ear.L": 0.12, "tail": -0.07}),
-        (46, 0, {"ear.R": -0.11, "tailTip": 0.12}), (61, 0, {}),
+        (1, 0, {}), (16, 0.013, {"spine": -0.035, "ear.L": 0.07, "tail": (0, 0.10, 0.02)}),
+        (31, 0, {"head": (0.015, -0.055, 0.12), "ear.R": (-0.06, 0.16, 0.07), "tailTip": 0.14}),
+        (38, 0.010, {"head": (-0.025, -0.025, 0.08), "ear.R": (0.07, -0.04, 0.02)}),
+        (48, 0.016, {"spine": -0.024, "tailTip": (-0.045, -0.09, 0.04)}), (61, 0, {}),
     ])
 
-    def stride(direction, passing):
-        return {
-            "thigh.L": direction * (0.16 if passing else 0.68),
-            "thigh.R": direction * (-0.10 if passing else -0.72),
-            "shin.L": (0.63 + 0.45 * direction) if passing else (0.43 - 0.24 * direction),
-            "shin.R": (0.63 - 0.45 * direction) if passing else (0.43 + 0.24 * direction),
-            "foot.L": -0.29, "foot.R": -0.29,
-            "upperArm.L": -direction * 0.75, "upperArm.R": direction * 0.75,
-            "forearm.L": -0.82, "forearm.R": -0.78, "spine": 0.24,
-            "head": -0.12, "ear.L": 0.14 if passing else -0.14,
-            "ear.R": 0.16 if passing else -0.13, "tail": direction * 0.11,
+    def running_pose(phase):
+        wave = sin(phase * 2 * pi)
+        bounce = cos((phase - 0.14) * 4 * pi)
+        lift = -0.072 - 0.022 * bounce
+        rotations = {
+            "spine": (0.31 + 0.06 * bounce, 0.055 * wave, 0.085 * wave),
+            "head": (-0.16 - 0.027 * bounce, -0.04 * wave, -0.063 * wave),
+            "ear.L": (-0.14 + 0.19 * cos(4 * pi * phase - 1.2), 0.13 * wave, 0.04 * wave),
+            "ear.R": (-0.17 + 0.17 * cos(4 * pi * phase - 1.8), 0.10 * wave, 0.05 * wave),
+            "tail": (-0.04 + 0.14 * cos(4 * pi * phase - 0.65), 0.06 * wave, -0.24 * wave),
+            "tailTip": (-0.04 + 0.21 * cos(4 * pi * phase - 1.15), 0, -0.14 * sin(2 * pi * phase - 0.9)),
         }
+        for side, offset, sign in (("L", 0, 1), ("R", 0.5, -1)):
+            foot_phase = (phase + offset) % 1.0
+            # Solve the hip, knee and boot angles for a driven ankle arc.
+            # Ground contact moves straight backward, with toe-off leading the recovery.
+            stance = 0.39
+            if foot_phase < stance:
+                contact = foot_phase / stance
+                y = -0.254 + 0.512 * contact
+                z = 0.098 + 0.059 * contact ** 4
+                pitch = -0.035 + 0.30 * contact ** 3
+            else:
+                recovery = (foot_phase - stance) / (1 - stance)
+                easing = recovery * recovery * (3 - 2 * recovery)
+                y = 0.258 - 0.512 * easing + 0.05 * sin(2 * pi * recovery)
+                z = 0.098 + 0.059 * (1 - recovery) + 0.245 * sin(pi * recovery) ** 1.25
+                pitch = 0.265 - 0.30 * easing + 0.43 * sin(pi * recovery)
+            thigh, shin = hypot(0.060, 0.29), hypot(0.084, 0.19)
+            drop = 0.58 + lift - z
+            reach = min(thigh + shin - 0.0001, hypot(y, drop))
+            lean = atan2(y, drop)
+            upper = lean - acos((thigh * thigh + reach * reach - shin * shin) / (2 * thigh * reach))
+            lower = lean + acos((shin * shin + reach * reach - thigh * thigh) / (2 * shin * reach))
+            thigh_delta = upper - atan2(-0.060, 0.29)
+            shin_delta = lower - atan2(0.084, 0.19)
+            rotations[f"thigh.{side}"] = thigh_delta
+            rotations[f"shin.{side}"] = shin_delta - thigh_delta
+            rotations[f"foot.{side}"] = pitch - shin_delta
+            arm = cos(2 * pi * foot_phase + 0.18)
+            rotations[f"upperArm.{side}"] = (0.26 + 0.66 * arm, 0.09 * sign, 0.03 * sign)
+            rotations[f"forearm.{side}"] = -0.82 - 0.25 * sin(2 * pi * foot_phase + 0.5)
+        return lift, rotations
 
-    action("Run", [
-        (1, 0.014, stride(1, False)), (6, 0.085, stride(1, True)),
-        (11, 0.014, stride(-1, False)), (16, 0.085, stride(-1, True)),
-        (21, 0.014, stride(1, False)),
-    ])
-    tuck = {"thigh.L": -0.95, "thigh.R": -0.59, "shin.L": 1.12, "shin.R": 1.04,
-            "upperArm.L": -0.55, "upperArm.R": 0.27, "spine": 0.34, "ear.L": -0.29, "tail": 0.36}
-    action("Jump", [(1, -0.025, stride(1, True)), (8, 0.07, tuck), (20, 0.045, tuck)])
-    action("Fall", [(1, 0.045, tuck), (14, 0, {"upperArm.L": 0.32, "upperArm.R": 0.35,
-                                                "shin.L": 0.19, "shin.R": 0.18, "tail": 0.51})])
-    action("Land", [(1, 0, tuck), (5, -0.036, {"spine": 0.46, "thigh.L": -0.28,
-                                              "thigh.R": -0.29, "shin.L": 0.52, "shin.R": 0.53}),
-                    (13, 0.02, stride(1, True))])
-    action("Stumble", [(1, 0.02, stride(1, True)), (7, -0.035, {"spine": 0.66, "head": -0.34,
-                                                               "upperArm.L": -1.55, "upperArm.R": 1.2,
-                                                               "ear.L": 0.46, "tail": -0.52}),
-                        (21, 0.01, stride(-1, True))])
-    action("Finish", [(1, 0.01, stride(1, True)), (10, 0.25, {"upperArm.L": -2.35, "upperArm.R": -2.08,
-                                                              "thigh.L": -0.44, "thigh.R": 0.23, "tail": 0.36}),
-                      (25, 0, {"upperArm.L": -1.58, "upperArm.R": -1.46}), (48, 0, {})])
-    action("Gadget", [(1, 0.01, stride(1, True)), (7, 0.05, {"upperArm.L": -1.12, "forearm.L": -1.2,
-                                                              "spine": 0.32, "thigh.R": 0.65}),
-                      (17, 0.02, stride(-1, True))])
+    action("Run", [(frame + 1, *running_pose((frame % 18) / 18)) for frame in range(19)])
+    launch = {"thigh.L": -0.74, "thigh.R": 0.56, "shin.L": 0.95, "shin.R": 0.2,
+              "foot.R": -0.38, "upperArm.L": 0.66, "upperArm.R": -1.15, "forearm.R": -0.74,
+              "spine": 0.25, "head": -0.28, "ear.L": -0.37, "ear.R": -0.30, "tail": 0.29}
+    tuck = {"thigh.L": -0.98, "thigh.R": -0.75, "shin.L": 1.04, "shin.R": 1.23,
+            "foot.L": -0.21, "foot.R": -0.43, "upperArm.L": (-0.63, 0.20, -0.15),
+            "upperArm.R": (-0.78, -0.26, 0.18), "forearm.L": -0.42, "forearm.R": -0.57,
+            "spine": 0.30, "head": -0.21, "ear.L": 0.24, "ear.R": 0.12, "tail": -0.21, "tailTip": 0.32}
+    brace = {"thigh.L": -0.19, "thigh.R": 0.02, "shin.L": 0.16, "shin.R": 0.22,
+             "foot.L": -0.17, "foot.R": -0.2, "spine": 0.13, "head": -0.10,
+             "upperArm.L": (0.22, 0.47, 0.09), "upperArm.R": (0.28, -0.38, -0.11),
+             "forearm.L": -0.42, "forearm.R": -0.35, "ear.L": 0.28, "ear.R": 0.17, "tail": -0.24}
+    action("Jump", [(1, -0.075, launch), (4, -0.015, launch), (8, 0.035, tuck), (16, 0.027, tuck)])
+    action("Fall", [(1, 0.027, tuck), (7, 0.012, brace), (14, 0, brace)])
+    compress = {"spine": 0.52, "head": -0.31, "thigh.L": -0.50, "thigh.R": -0.37,
+                "shin.L": 0.85, "shin.R": 0.81, "foot.L": -0.36, "foot.R": -0.44,
+                "upperArm.L": (0.36, 0.28, -0.12), "upperArm.R": (0.68, -0.35, 0.06),
+                "forearm.L": -0.64, "forearm.R": -0.73, "ear.L": 0.40, "ear.R": 0.23,
+                "tail": -0.55, "tailTip": 0.3}
+    action("Land", [(1, -0.010, brace), (4, -0.105, compress), (9, *running_pose(0.46)),
+                    (13, *running_pose(0.69))])
+    recoil = {"spine": (-0.22, 0.29, -0.21), "head": (0.30, -0.13, 0.16),
+              "upperArm.L": (-0.25, 0.98, -0.41), "upperArm.R": (0.56, -0.60, 0.42),
+              "forearm.L": -0.63, "forearm.R": -0.45, "thigh.L": -0.48, "thigh.R": 0.25,
+              "shin.L": 0.66, "shin.R": 0.79, "ear.L": -0.47, "ear.R": -0.31,
+              "tail": (0.4, 0.14, -0.45), "tailTip": (0.20, -0.03, 0.26)}
+    catch = {**compress, "spine": (0.58, -0.24, 0.20), "head": (-0.36, 0.19, -0.09),
+             "thigh.L": 0.02, "thigh.R": -0.65, "shin.L": 0.54, "shin.R": 0.42,
+             "upperArm.L": (-0.7, 0.47, 0.1), "upperArm.R": (0.64, -0.29, 0.10),
+             "tail": (-0.30, 0, 0.72)}
+    action("Stumble", [(1, *running_pose(0.25)), (4, -0.058, recoil), (9, -0.116, catch),
+                        (14, *running_pose(0.61)), (21, *running_pose(0.9))])
+    salute = {"spine": (-0.08, -0.09, -0.10), "head": (-0.10, 0.10, 0.16),
+              "upperArm.L": (-2.27, 0.31, -0.04), "upperArm.R": (-1.72, -0.32, 0.12),
+              "forearm.L": -0.38, "forearm.R": -0.82, "thigh.L": -0.57, "thigh.R": 0.23,
+              "shin.L": 0.71, "shin.R": 0.48, "ear.L": (-0.13, 0.14, 0.07),
+              "ear.R": (-0.19, -0.18, -0.02), "tail": (-0.2, 0, 0.34)}
+    action("Finish", [(1, *running_pose(0.15)), (5, -0.10, compress),
+                      (13, 0.23, salute), (18, 0.16, salute), (24, -0.10, compress),
+                      (32, 0, {"upperArm.L": (-1.63, 0.38, 0.08), "forearm.L": -0.69,
+                               "ear.R": (-0.05, -0.18, -0.14), "tailTip": (0.04, 0, -0.31)}),
+                      (38, 0, {"upperArm.L": (-1.88, 0.21, 0.20), "forearm.L": -0.49}), (53, 0, {})])
+    lift, throw = running_pose(0.35)
+    throw.update({"spine": (0.28, -0.23, 0.31), "head": (-0.15, 0.09, -0.16),
+                  "upperArm.R": (-1.42, -0.40, 0.07), "forearm.R": -0.21,
+                  "upperArm.L": (0.57, 0.23, -0.18), "tail": (0.11, 0, -0.33)})
+    action("Gadget", [(1, *running_pose(0.11)), (6, lift, throw), (10, lift, throw),
+                      (17, *running_pose(0.85))])
     rig.animation_data.action = idle
     scene.frame_set(1)
 

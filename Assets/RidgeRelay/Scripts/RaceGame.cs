@@ -13,6 +13,7 @@ namespace RidgeRelay
         private TrackView track;
         private RaceHud hud;
         private RaceAudio audioFeedback;
+        private RaceEffects effects;
         private PrivateRaceSession online;
         private Camera chase;
         private RaceSimulation race;
@@ -52,6 +53,7 @@ namespace RidgeRelay
             track = new GameObject("Windmill Gorge").AddComponent<TrackView>();
             track.Build();
             audioFeedback = gameObject.AddComponent<RaceAudio>();
+            effects = gameObject.AddComponent<RaceEffects>();
             online = gameObject.AddComponent<PrivateRaceSession>();
             hud = new GameObject("Race HUD").AddComponent<RaceHud>();
             hud.StartRequested += StartRace;
@@ -161,8 +163,9 @@ namespace RidgeRelay
             if (paused) return;
             RaceSimulation visible = (displayingOnline ? online.DisplayRace : race) ?? preview;
             ShowRunners(visible);
-            track.UpdateVisuals(visible);
             int slot = displayingOnline ? Mathf.Clamp(online.LocalSlot, 0, RaceSimulation.Entrants - 1) : 0;
+            track.UpdateVisuals(visible, slot);
+            effects.Present(visible == preview ? null : visible, slot, hud.ReducedMotion);
             RunnerState player = visible.Runners[slot];
             MoveCamera(player, snapCamera || player.Recovery >= 0.84f);
             snapCamera = false;
@@ -170,23 +173,31 @@ namespace RidgeRelay
 
         private void ShowRunners(RaceSimulation state)
         {
-            for (int i = 0; i < views.Length; i++) views[i].Show(state.Runners[i], state.Phase);
+            for (int i = 0; i < views.Length; i++)
+                views[i].Show(state.Runners[i], state.Phase, hud.ReducedMotion);
         }
 
         private void MoveCamera(RunnerState runner, bool snap)
         {
-            var rear = TrackView.Sample(runner.Distance - 5.7f, runner.Lateral * 0.53f);
-            var anchor = TrackView.Sample(runner.Distance, runner.Lateral * 0.25f);
-            var ahead = TrackView.Sample(runner.Distance + 8, runner.Lateral * 0.12f);
+            float tunnel = TrackView.TunnelCameraBlend(runner.Distance);
+            var rear = TrackView.Sample(runner.Distance - Mathf.Lerp(5.7f, 3.9f, tunnel),
+                runner.Lateral * Mathf.Lerp(0.53f, 1f, tunnel));
+            var anchor = TrackView.Sample(runner.Distance,
+                runner.Lateral * Mathf.Lerp(0.25f, 1f, tunnel));
+            var ahead = TrackView.Sample(runner.Distance + Mathf.Lerp(8f, 5f, tunnel),
+                runner.Lateral * Mathf.Lerp(0.12f, 1f, tunnel));
             Vector3 targetPosition = rear.Position;
-            targetPosition.y = Mathf.Max(rear.Position.y + 2.5f, anchor.Position.y + 1.8f);
-            targetPosition.y += runner.Height * 0.16f;
+            targetPosition.y = Mathf.Max(rear.Position.y + Mathf.Lerp(2.5f, 1.9f, tunnel),
+                anchor.Position.y + Mathf.Lerp(1.8f, 1.3f, tunnel));
+            targetPosition.y += runner.Height * 0.16f * (1 - tunnel);
             Vector3 aim = ahead.Position + Vector3.up * 0.8f;
             float blend = snap ? 1 : 1 - Mathf.Exp(-14 * Time.deltaTime);
             chase.transform.position = Vector3.Lerp(chase.transform.position, targetPosition, blend);
             Quaternion heading = Quaternion.LookRotation(aim - chase.transform.position, Vector3.up);
             chase.transform.rotation = Quaternion.Slerp(chase.transform.rotation, heading, blend);
-            float fov = !hud.ReducedMotion && runner.Boost > 0 ? 59 : 55;
+            bool accelerating = runner.Boost > 0 || runner.RouteBoost > 0 ||
+                runner.Slipstream >= RaceSimulation.SlipstreamActiveThreshold;
+            float fov = !hud.ReducedMotion && accelerating ? Mathf.Lerp(59, 55, tunnel) : 55;
             chase.fieldOfView = Mathf.Lerp(chase.fieldOfView, fov, blend);
         }
     }

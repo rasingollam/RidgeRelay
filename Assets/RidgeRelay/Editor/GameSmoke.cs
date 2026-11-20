@@ -131,6 +131,10 @@ namespace RidgeRelay.Editor
 
         private static void ObserveLog(string message, string stackTrace, LogType type)
         {
+            // Unity 6.6 can run editor search indexing as Play Mode initializes.
+            if (type == LogType.Exception && stackTrace.Contains("UnityEditor.Search.SearchInit.IndexationOnStartup"))
+                return;
+
             if (runtimeError == null && (type == LogType.Error || type == LogType.Exception || type == LogType.Assert))
                 runtimeError = message + "\n" + stackTrace;
         }
@@ -138,9 +142,9 @@ namespace RidgeRelay.Editor
         private static IEnumerable<Func<bool>> Check()
         {
             yield return null;
-            var game = UnityEngine.Object.FindFirstObjectByType<RaceGame>();
-            var hud = UnityEngine.Object.FindFirstObjectByType<RaceHud>();
-            var camera = UnityEngine.Object.FindFirstObjectByType<Camera>();
+            var game = UnityEngine.Object.FindAnyObjectByType<RaceGame>();
+            var hud = UnityEngine.Object.FindAnyObjectByType<RaceHud>();
+            var camera = UnityEngine.Object.FindAnyObjectByType<Camera>();
             Require(game != null && hud != null && camera != null, "Race scene did not initialize.");
             Require(RaceField != null, "Could not observe the active race.");
             GameObject courier = GameObject.Find("Player courier");
@@ -236,17 +240,19 @@ namespace RidgeRelay.Editor
             Press();
             yield return null;
 
-            currentStep = "swiping and jumping with simultaneous touches";
+            currentStep = "swiping sideways and up with simultaneous touches";
             Vector2 center = new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
             Vector2 swipe = center + Vector2.right * (Screen.height * 0.22f * (inwardLane - startingLane));
-            Vector2 jump = ControlPosition(hud, "JUMP");
+            Vector2 jumpStart = center + Vector2.left * (Screen.width * 0.15f);
+            Vector2 jumpEnd = jumpStart + Vector2.up * (Screen.height * 0.22f);
             SetTouch(1, TouchPhase.Began, center);
+            SetTouch(2, TouchPhase.Began, jumpStart);
             yield return null;
             SetTouch(1, TouchPhase.Moved, swipe);
-            SetTouch(2, TouchPhase.Began, jump);
+            SetTouch(2, TouchPhase.Moved, jumpEnd);
             yield return () => runner.Lane == inwardLane && runner.Height > 0;
             SetTouch(1, TouchPhase.Ended, swipe);
-            SetTouch(2, TouchPhase.Ended, jump);
+            SetTouch(2, TouchPhase.Ended, jumpEnd);
             yield return null;
             Press(outward);
             yield return () => runner.Lane == startingLane;
@@ -255,12 +261,19 @@ namespace RidgeRelay.Editor
             currentStep = "collecting and using Tailwind";
             // The left start lane reaches the first Tailwind before the other racers.
             yield return () => runner.Held == Gadget.Tailwind || runner.Distance > 49;
-            Require(runner.Held == Gadget.Tailwind && HasLabel(hud, "TAILWIND"),
-                "The first pickup should load the gadget button.");
+            Require(runner.Held == Gadget.Tailwind && HasLabel(hud, "TAILWIND") &&
+                HasLabel(hud, "Tap to sprint faster"),
+                "The first pickup should show the gadget and explain its effect.");
             Press(Key.E);
             yield return () => runner.Boost > 0;
             Press();
             Require(runner.Held == Gadget.None, "Using Tailwind should empty the gadget slot.");
+            yield return null;
+            RaceEffects effects = game.GetComponent<RaceEffects>();
+            Require(effects != null && Array.Exists(effects.GetComponentsInChildren<MeshRenderer>(),
+                renderer => renderer.enabled && renderer.name == "Wind strand" &&
+                    renderer.sharedMaterial.name == "Tailwind"),
+                "Tailwind use should show an active trail.");
 
             currentStep = "completing the course";
             Time.timeScale = 8;

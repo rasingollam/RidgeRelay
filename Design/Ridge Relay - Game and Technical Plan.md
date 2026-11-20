@@ -75,3 +75,25 @@ The first implementation ticket is the Android chase-camera course using primiti
 - [Jerboa turnaround](Concepts/character-sheet.png)
 - [Windmill Gorge and modular track kit](Concepts/track-kit.png)
 - [Image generation prompts](Concepts/Image%20Prompts.md)
+
+## Competitive iteration
+
+The opening gate gives every racer a Tailwind. Later two-lane gates award one weighted pickup per racer. A rival taking a pickup leaves the gate available for the other racers. Position affects the odds, and each racer can carry one gadget at a time.
+
+Following a nearby rival in the same lane charges Slipstream. Pulse Shot requires a rival ahead in that lane and gives a 0.65-second warning. Changing lanes, jumping, or using Shell Film can defend against a shot. Bots use the same rules and have seeded reaction delays.
+
+Windmill Gorge now has a crest, a downhill shortcut with a boost reward, and a split tunnel. Commit to a tunnel route before the divider. The narrow right passage grants a 12% speed bonus and has a hurdle to time. The wide left passage gives two lanes to maneuver.
+
+### Bot playtest
+
+All 24 seeded four-bot races finished with distinct placements. Mean duration went from 73.57 to 70.93 seconds, and lead changes increased from 17 to 90 compared with the original rules and bots. The new races recorded 15 Pulse hits, 49 dodges, 16 shield blocks, 58 shortcut clears, and zero shortcut falls. A separate scenario verified the shortcut fall and recovery. Starting slots finished first 8, 5, 5, and 6 times respectively.
+
+| Checkpoint distance | Original gap | Competitive gap |
+| --- | --- | --- |
+| 118 m | 6.86 m | 3.13 m |
+| 236 m | 16.04 m | 6.68 m |
+| 354 m | 16.31 m | 9.70 m |
+| 472 m | 21.11 m | 13.45 m |
+| 590 m | 27.54 m | 13.26 m |
+
+Use a four-person race to tune Pulse warning readability, shortcut difficulty, and comeback odds on actual touch hardware. Compare lead changes and checkpoint gaps against these bot results.

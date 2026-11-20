@@ -8,9 +8,9 @@ Ridge Relay is a 3D footrace prototype for Unity. Race through Windmill Gorge fr
 
 ## What’s in the project
 
-- One canyon course with an offline race against three bots.
+- Windmill Gorge features a hill crest, a downhill jump shortcut, and a split tunnel with a faster right-hand route.
 - Keyboard and touch controls, mirrored touch buttons, and a reduced-motion setting.
-- Three gadgets, checkpoint recovery, race results, and a locally saved best time.
+- Four gadgets, checkpoint recovery, race results, and a locally saved best time.
 - Editable Blender sources for the rigged courier, environment and pickups.
 - Private races with join codes using Unity Multiplayer Services, Relay and Netcode for GameObjects. A linked Unity Cloud project is required for online play.
 
@@ -23,9 +23,16 @@ Ridge Relay is a 3D footrace prototype for Unity. Race through Windmill Gorge fr
 | Action | Keyboard | Touch |
 | --- | --- | --- |
 | Change lanes | A / D or ← / → | Swipe left or right |
-| Jump | Space | Tap Jump |
+| Jump | ↑ or Space | Swipe up |
 | Use gadget | E | Tap the gadget button |
 | Pause | Esc | Tap Pause |
+
+## Race tactics
+
+- **Slipstream** builds while you follow close behind a rival in the same lane. Fill the meter for a short speed burst.
+- **Tailwind** gives an immediate burst. **Pulse Shot** warns a rival ahead in your lane before slowing them. Change lanes, jump, or use **Shell Film** to defend. **Bristle Pad** leaves a hazard for the runners behind you.
+- Pickup gates award one gadget per racer. The first gate teaches Tailwind. Later gates give trailing racers better odds of drawing Tailwind or Pulse Shot.
+- Look for gold markings on the downhill shortcut and commit to a tunnel route before the divider. The narrower right passage is faster, and poor timing can still cost the advantage.
 
 ## Build and test
 

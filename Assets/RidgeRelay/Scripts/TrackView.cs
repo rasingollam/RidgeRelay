@@ -31,6 +31,11 @@ namespace RidgeRelay
         private const float Spacing = 0.5f;
         private const float DeckHalfWidth = RaceSimulation.LaneWidth * 1.5f;
         private const float ChunkLength = 48;
+        private const float CrestStart = 340;
+        private const float CrestEnd = 402;
+        private const float TunnelDivider = RaceSimulation.LaneWidth * 0.5f;
+        private const float TunnelDividerHalfWidth = 0.10f;
+        private const float TunnelClearance = 5.6f;
         private static readonly TrackPose[] Path = CreatePath();
         private readonly Dictionary<int, Transform> pickups = new Dictionary<int, Transform>();
         private readonly List<Transform> traps = new List<Transform>();
@@ -38,7 +43,7 @@ namespace RidgeRelay
         private readonly List<Material> ownedMaterials = new List<Material>();
         private readonly List<Mesh> ownedMeshes = new List<Mesh>();
         private Material stone, sandstone, inset, bright, rail, teal, metal, hazard, water, ripple;
-        private Material redCliff, mauveCliff, sandCliff, green, timber, fabric, boost, pad, shield;
+        private Material redCliff, mauveCliff, sandCliff, green, timber, fabric, guide, pad, gold, tunnelStone;
         private bool built;
 
         public static TrackPose Sample(float distance, float lateral = 0)
@@ -51,8 +56,27 @@ namespace RidgeRelay
             Vector3 forward = Vector3.Lerp(a.Forward, b.Forward, t).normalized;
             Vector3 up = Vector3.Lerp(a.Up, b.Up, t).normalized;
             Vector3 right = Vector3.Cross(up, forward).normalized;
-            Vector3 position = Vector3.Lerp(a.Position, b.Position, t) + right * (lateral * RaceSimulation.LaneWidth);
+            float across = TunnelAcross(distance, lateral * RaceSimulation.LaneWidth);
+            Vector3 position = Vector3.Lerp(a.Position, b.Position, t) + right * across;
             return new TrackPose(position, forward, up, right);
+        }
+
+        public static float TunnelCameraBlend(float distance) =>
+            Mathf.SmoothStep(0, 1, (distance - (RaceSimulation.TunnelLockStart - 10)) / 10) *
+            (1 - Mathf.SmoothStep(0, 1, (distance - RaceSimulation.TunnelLockEnd) / 9));
+
+        private static float TunnelAcross(float distance, float across)
+        {
+            float blend = Mathf.SmoothStep(0, 1, (distance - RaceSimulation.TunnelLockStart) / 4) *
+                (1 - Mathf.SmoothStep(0, 1, (distance - RaceSimulation.TunnelEnd) / 4));
+            float scale = across <= TunnelDivider ? 1.16f : 0.82f;
+            return TunnelDivider + (across - TunnelDivider) * Mathf.Lerp(1, scale, blend);
+        }
+
+        private static Vector3 TrackPoint(float distance, float across, float height)
+        {
+            TrackPose pose = Sample(distance, across / RaceSimulation.LaneWidth);
+            return pose.Position + pose.Up * height;
         }
 
         private static TrackPose[] CreatePath()
@@ -79,6 +103,11 @@ namespace RidgeRelay
         {
             float yaw = Heading(s);
             float pitch = 0.115f * Mathf.Sin(s * 0.047f) + 0.085f * Mathf.Sin(s * 0.098f);
+            if (s > CrestStart && s < CrestEnd)
+            {
+                float phase = (s - CrestStart) / (CrestEnd - CrestStart);
+                pitch += 0.24f * Mathf.Sin(phase * 2 * Mathf.PI) - 0.06f * Mathf.Sin(phase * Mathf.PI);
+            }
             return new Vector3(Mathf.Sin(yaw) * Mathf.Cos(pitch), Mathf.Sin(pitch), Mathf.Cos(yaw) * Mathf.Cos(pitch));
         }
 
@@ -94,6 +123,7 @@ namespace RidgeRelay
             built = true;
             CreatePalette();
             BuildCourse();
+            BuildTunnel();
             BuildEnvironment();
             BuildFeatures();
         }
@@ -116,9 +146,10 @@ namespace RidgeRelay
             green = MaterialFor("Canyon scrub", 0x647c67);
             timber = MaterialFor("Ochre wood", 0x7c5947);
             fabric = MaterialFor("Windmill sails", 0xf4d2a1);
-            boost = MaterialFor("Tailwind turquoise", 0x11c7bf, true);
+            guide = MaterialFor("Turquoise wayfinding", 0x20d4c4, true);
             pad = MaterialFor("Bristle orange", 0xff7940, true);
-            shield = MaterialFor("Shell purple", 0xad79ec, true);
+            gold = MaterialFor("Gold route markers", 0xffbb53, true);
+            tunnelStone = MaterialFor("Tunnel interior sandstone", 0xa86b61);
         }
 
         private Material MaterialFor(string materialName, int packedColor, bool emission = false)
@@ -147,6 +178,10 @@ namespace RidgeRelay
             cuts.Add(End);
             cuts.Add(0);
             cuts.Add(RaceSimulation.CourseLength);
+            cuts.Add(RaceSimulation.TunnelLockStart);
+            cuts.Add(RaceSimulation.TunnelStart);
+            cuts.Add(RaceSimulation.TunnelEnd);
+            cuts.Add(RaceSimulation.TunnelLockEnd);
             foreach (CourseFeature feature in RaceSimulation.Features)
             {
                 if (!feature.Gap) continue;
@@ -179,11 +214,11 @@ namespace RidgeRelay
                 var pier = new Batch();
                 for (float s = from; s < Mathf.Min(from + 54, End - 5); s += 9)
                 {
-                    TrackPose pose = Sample(s);
                     for (int side = -1; side <= 1; side += 2)
                     {
                         if (GapAt(s, side)) continue;
-                        Vector3 top = pose.Offset(2.12f * side, -0.42f);
+                        TrackPose pose = Sample(s, side);
+                        Vector3 top = pose.Offset(0.12f * side, -0.42f);
                         float height = top.y + 10.5f;
                         AddWorldBox(pier, stone, top - Vector3.up * (height * 0.5f), pose.Forward, 0.85f, height, 1.2f);
                         AddWorldBox(pier, rail, top - Vector3.up * 0.18f, pose.Forward, 1.3f, 0.36f, 1.55f);
@@ -241,9 +276,9 @@ namespace RidgeRelay
                 AddDeckWall(batch, rail, a, b, edge, lane < 0, 0, 0.155f);
                 if (Mathf.FloorToInt(a + 14) % 6 == 0)
                 {
-                    TrackPose p = Sample(a + 0.08f);
-                    AddBox(batch, rail, p, edge - lane * 0.12f, 0.20f, 0, 0.3f, 0.4f, 0.3f);
-                    AddBox(batch, bright, p, edge - lane * 0.12f, 0.42f, 0, 0.34f, 0.07f, 0.34f);
+                    TrackPose p = Sample(a + 0.08f, (edge - lane * 0.12f) / RaceSimulation.LaneWidth);
+                    AddBox(batch, rail, p, 0, 0.20f, 0, 0.3f, 0.4f, 0.3f);
+                    AddBox(batch, bright, p, 0, 0.42f, 0, 0.34f, 0.07f, 0.34f);
                 }
             }
         }
@@ -259,31 +294,27 @@ namespace RidgeRelay
         private static void Strip(Batch batch, Material material, float from, float to, float left, float right, float y)
         {
             if (to <= from) return;
-            TrackPose a = Sample(from);
-            TrackPose b = Sample(to);
-            batch.Quad(material, a.Offset(left, y), b.Offset(left, y), b.Offset(right, y), a.Offset(right, y));
+            batch.Quad(material, TrackPoint(from, left, y), TrackPoint(to, left, y),
+                TrackPoint(to, right, y), TrackPoint(from, right, y));
         }
 
         private static void AddDeckWall(Batch batch, Material material, float from, float to, float side,
             bool facesLeft, float bottom = -0.4f, float top = 0)
         {
-            TrackPose a = Sample(from);
-            TrackPose b = Sample(to);
-            Vector3 p = a.Offset(side, top);
-            Vector3 q = a.Offset(side, bottom);
-            Vector3 r = b.Offset(side, bottom);
-            Vector3 s = b.Offset(side, top);
+            Vector3 p = TrackPoint(from, side, top);
+            Vector3 q = TrackPoint(from, side, bottom);
+            Vector3 r = TrackPoint(to, side, bottom);
+            Vector3 s = TrackPoint(to, side, top);
             if (facesLeft) batch.Quad(material, p, q, r, s);
             else batch.Quad(material, s, r, q, p);
         }
 
         private static void AddDeckEnd(Batch batch, Material material, float distance, float left, float right, bool facesBack)
         {
-            TrackPose pose = Sample(distance);
-            Vector3 a = pose.Offset(left, 0);
-            Vector3 b = pose.Offset(right, 0);
-            Vector3 c = pose.Offset(right, -0.4f);
-            Vector3 d = pose.Offset(left, -0.4f);
+            Vector3 a = TrackPoint(distance, left, 0);
+            Vector3 b = TrackPoint(distance, right, 0);
+            Vector3 c = TrackPoint(distance, right, -0.4f);
+            Vector3 d = TrackPoint(distance, left, -0.4f);
             if (facesBack) batch.Quad(material, a, b, c, d);
             else batch.Quad(material, d, c, b, a);
         }
@@ -325,6 +356,77 @@ namespace RidgeRelay
             Emit(major ? (s == 0 ? "Starting gate" : "Finish gate") : "Checkpoint gate", gate);
         }
 
+        private void BuildTunnel()
+        {
+            var tunnel = new Batch();
+            const float left = -DeckHalfWidth - 0.12f;
+            const float right = DeckHalfWidth + 0.12f;
+            float dividerLeft = TunnelDivider - TunnelDividerHalfWidth;
+            float dividerRight = TunnelDivider + TunnelDividerHalfWidth;
+            float start = RaceSimulation.TunnelStart;
+            float end = RaceSimulation.TunnelEnd;
+
+            for (float from = start; from < end; from += 2)
+            {
+                float to = Mathf.Min(from + 2, end);
+                Strip(tunnel, redCliff, from, to, left - 0.24f, right + 0.24f, TunnelClearance + 0.32f);
+                tunnel.Quad(tunnelStone, TrackPoint(from, right, TunnelClearance),
+                    TrackPoint(to, right, TunnelClearance), TrackPoint(to, left, TunnelClearance),
+                    TrackPoint(from, left, TunnelClearance));
+                AddDeckWall(tunnel, tunnelStone, from, to, left, false, 0, TunnelClearance);
+                AddDeckWall(tunnel, tunnelStone, from, to, right, true, 0, TunnelClearance);
+                AddDeckWall(tunnel, sandCliff, from, to, left - 0.24f, true, 0, TunnelClearance + 0.32f);
+                AddDeckWall(tunnel, sandCliff, from, to, right + 0.24f, false, 0, TunnelClearance + 0.32f);
+                AddDeckWall(tunnel, stone, from, to, dividerLeft, true, 0, TunnelClearance);
+                AddDeckWall(tunnel, sandstone, from, to, dividerRight, false, 0, TunnelClearance);
+                AddDeckWall(tunnel, guide, from, to, dividerLeft - 0.005f, true, 1.52f, 1.62f);
+                AddDeckWall(tunnel, gold, from, to, dividerRight + 0.005f, false, 1.52f, 1.62f);
+            }
+
+            for (float s = start - 8; s < end + 2; s += 3.4f)
+            {
+                PaintArrow(tunnel, guide, s, -1, 0.54f);
+                PaintArrow(tunnel, gold, s, RaceSimulation.TunnelFastLane, 0.58f);
+                if (s < start || s > end - 0.5f) continue;
+
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    TrackPose fixture = Sample(s, side * 1.28f);
+                    AddBox(tunnel, metal, fixture, 0, TunnelClearance - 0.13f, 0, 0.52f, 0.18f, 0.64f);
+                    AddBox(tunnel, side < 0 ? guide : gold, fixture, 0, TunnelClearance - 0.24f, 0,
+                        0.42f, 0.055f, 0.53f);
+                }
+            }
+
+            foreach (float portal in new[] { start, end })
+            {
+                foreach (float across in new[] { left, TunnelDivider, right })
+                {
+                    TrackPose wall = Sample(portal, across / RaceSimulation.LaneWidth);
+                    AddBox(tunnel, stone, wall, 0, TunnelClearance * 0.5f, 0, 0.28f, TunnelClearance, 0.5f);
+                }
+
+                TrackPose broad = Sample(portal, -0.5f);
+                TrackPose narrow = Sample(portal, RaceSimulation.TunnelFastLane);
+                AddBox(tunnel, guide, broad, 0, TunnelClearance - 0.11f, 0, 3.85f, 0.26f, 0.44f);
+                AddBox(tunnel, gold, narrow, 0, TunnelClearance - 0.11f, 0, 1.42f, 0.26f, 0.44f);
+            }
+
+            Emit("Tank Tunnel", tunnel);
+        }
+
+        private static void PaintArrow(Batch batch, Material paint, float distance, int lane, float halfWidth)
+        {
+            float center = lane * RaceSimulation.LaneWidth;
+            const float y = 0.031f;
+            Vector3 left = TrackPoint(distance, center - halfWidth, y);
+            Vector3 right = TrackPoint(distance, center + halfWidth, y);
+            Vector3 tip = TrackPoint(distance + 0.62f, center, y);
+            Vector3 notch = TrackPoint(distance + 0.33f, center, y);
+            batch.Quad(paint, left, tip, notch, TrackPoint(distance - 0.20f, center - halfWidth, y));
+            batch.Quad(paint, right, TrackPoint(distance - 0.20f, center + halfWidth, y), notch, tip);
+        }
+
         private void BuildEnvironment()
         {
             var canyon = new Batch();
@@ -343,7 +445,9 @@ namespace RidgeRelay
                     TrackPose p = Sample(s);
                     for (int side = -1; side <= 1; side += 2)
                     {
-                        float x = side * (8 + Range(random, 0, 11));
+                        float tunnelMargin = s > RaceSimulation.TunnelLockStart - 4 &&
+                            s < RaceSimulation.TunnelLockEnd + 4 ? 4 : 0;
+                        float x = side * (8 + tunnelMargin + Range(random, 0, 11));
                         Vector3 basePoint = p.Offset(x, 0, Range(random, -3, 3));
                         basePoint.y = -9.8f;
                         float width = Range(random, 5, 10);
@@ -469,45 +573,22 @@ namespace RidgeRelay
         private void BuildFeatures()
         {
             GameObject chevrons = Resources.Load<GameObject>("RidgeRelay/Environment/Chevrons");
-            GameObject[] gadgetIcons =
-            {
-                null,
-                Resources.Load<GameObject>("RidgeRelay/Environment/PickupTailwind"),
-                Resources.Load<GameObject>("RidgeRelay/Environment/PickupBristlePad"),
-                Resources.Load<GameObject>("RidgeRelay/Environment/PickupShellFilm")
-            };
             for (int i = 0; i < RaceSimulation.Features.Count; i++)
             {
                 CourseFeature feature = RaceSimulation.Features[i];
                 float across = feature.Lane * RaceSimulation.LaneWidth;
                 if (feature.Item != Gadget.None)
                 {
-                    var ring = new Batch();
-                    TrackPose pick = Sample(feature.Start + 0.5f, feature.Lane);
-                    AddBox(ring, metal, pick, 0, 0.055f, 0, 0.94f, 0.11f, 0.98f);
-                    AddBox(ring, GadgetMaterial(feature.Item), pick, 0, 0.117f, 0, 0.74f, 0.02f, 0.78f);
-                    Emit("Supply station", ring);
-                    var pickup = new GameObject(feature.Item.ToString());
-                    pickup.transform.SetParent(transform);
-                    pickup.transform.position = pick.Offset(0, 0.8f);
-                    pickups.Add(i, pickup.transform);
-                    GameObject icon = gadgetIcons[(int)feature.Item];
-                    if (icon != null) Instantiate(icon, pickup.transform, false);
-                    else BuildGadgetIcon(feature.Item, pickup.transform);
+                    BuildPickupGate(i, feature);
                     continue;
                 }
 
                 var warning = new Batch();
-                TrackPose pose = Sample(feature.Start - (feature.Gap ? 6 : 3.75f), feature.Lane);
+                Material paint = feature.Shortcut ? gold : hazard;
                 for (int line = 0; line < 2; line++)
                 {
-                    Vector3 middle = pose.Offset(0, 0.029f, line * (feature.Gap ? 1.7f : 0.65f));
-                    Vector3 left = middle - pose.Right * 0.64f;
-                    Vector3 right = middle + pose.Right * 0.64f;
-                    Vector3 tip = middle + pose.Forward * 0.54f;
-                    Vector3 notch = middle + pose.Forward * 0.31f;
-                    warning.Triangle(hazard, left, tip, notch);
-                    warning.Triangle(hazard, right, notch, tip);
+                    float distance = feature.Start - (feature.Gap ? 6 : 3.75f) + line * (feature.Gap ? 1.7f : 0.78f);
+                    PaintArrow(warning, paint, distance, feature.Lane, 0.64f);
                 }
 
                 if (feature.Gap)
@@ -515,11 +596,14 @@ namespace RidgeRelay
                     TrackPose end = Sample(feature.End, feature.Lane);
                     for (int side = -1; side <= 1; side += 2)
                     {
-                        AddBox(warning, teal, end, side * 0.82f, 0.35f, 0.15f, 0.12f, 0.7f, 0.12f);
-                        AddBox(warning, bright, end, side * 0.82f, 0.75f, 0.15f, 0.22f, 0.14f, 0.22f);
+                        AddBox(warning, teal, end, side * 0.82f, 0.5f, 0.15f, 0.12f, 1.0f, 0.12f);
+                        AddBox(warning, feature.Shortcut ? gold : bright, end, side * 0.82f, 1.06f, 0.15f,
+                            0.22f, 0.16f, 0.22f);
                     }
 
-                    Strip(warning, teal, feature.End + 0.05f, feature.End + 0.4f, across - 0.73f, across + 0.73f, 0.031f);
+                    Strip(warning, feature.Shortcut ? gold : teal, feature.End + 0.05f, feature.End + 0.4f,
+                        across - 0.73f, across + 0.73f, 0.031f);
+                    if (feature.Shortcut) MarkShortcut(warning, feature, across);
                 }
                 else
                 {
@@ -529,7 +613,7 @@ namespace RidgeRelay
                         AddBox(warning, bright, hurdle, 0.27f * slat, 0.34f, -0.162f, 0.17f, 0.32f, 0.016f);
                 }
 
-                Emit(feature.Gap ? "Jump markings" : "Lane hurdle", warning);
+                Emit(feature.Shortcut ? "Downhill shortcut" : (feature.Gap ? "Jump markings" : "Lane hurdle"), warning);
                 if (chevrons != null && feature.Gap)
                 {
                     TrackPose sign = Sample(feature.Start - 6);
@@ -540,48 +624,53 @@ namespace RidgeRelay
             }
         }
 
-        private Material GadgetMaterial(Gadget gadget)
+        private void MarkShortcut(Batch batch, CourseFeature feature, float across)
         {
-            switch (gadget)
-            {
-                case Gadget.Tailwind: return boost;
-                case Gadget.BristlePad: return pad;
-                default: return shield;
-            }
+            PaintArrow(batch, gold, feature.Start - 13, feature.Lane, 0.66f);
+            PaintArrow(batch, gold, feature.Start - 10, feature.Lane, 0.66f);
+            Strip(batch, gold, feature.Start - 1.28f, feature.Start - 0.9f, across - 0.75f, across + 0.75f, 0.036f);
+            Strip(batch, bright, feature.Start - 0.90f, feature.Start - 0.73f, across - 0.75f, across + 0.75f, 0.036f);
+            TrackPose sign = Sample(feature.Start - 10, feature.Lane);
+            AddBox(batch, metal, sign, -1.22f, 0.72f, 0, 0.16f, 1.44f, 0.22f);
+            AddBox(batch, gold, sign, -1.22f, 1.62f, 0, 0.55f, 0.38f, 0.2f);
+            for (float s = feature.End + 2; s < feature.End + 15; s += 3.5f)
+                PaintArrow(batch, gold, s, feature.Lane, 0.57f);
         }
 
-        private void BuildGadgetIcon(Gadget gadget, Transform parent)
+        private void BuildPickupGate(int index, CourseFeature feature)
         {
-            var batch = new Batch();
-            TrackPose pose = LevelPose(Vector3.zero, Vector3.forward);
-            Material color = GadgetMaterial(gadget);
-            if (gadget == Gadget.Tailwind)
+            TrackPose gate = Sample(feature.Start + 0.5f, feature.Lane);
+            var frame = new Batch();
+            for (int side = -1; side <= 1; side += 2)
             {
-                for (int i = 0; i < 3; i++)
-                    AddBox(batch, color, pose, 0, -0.21f + i * 0.20f, 0, 0.7f - i * 0.18f, 0.14f, 0.37f);
+                AddBox(frame, metal, gate, side * 0.88f, 0.24f, 0, 0.16f, 0.48f, 0.58f);
+                AddBox(frame, guide, gate, side * 0.88f, 0.5f, 0, 0.19f, 0.08f, 0.58f);
             }
-            else if (gadget == Gadget.BristlePad)
-            {
-                AddBox(batch, color, pose, 0, -0.17f, 0, 0.62f, 0.18f, 0.55f);
-                for (int i = -1; i <= 1; i++)
-                    AddBox(batch, color, pose, i * 0.18f, 0.055f, 0, 0.12f, 0.3f, 0.34f);
-            }
-            else
-            {
-                AddBox(batch, color, pose, 0, 0.03f, 0, 0.60f, 0.47f, 0.37f);
-                AddBox(batch, color, pose, 0, -0.23f, 0, 0.36f, 0.18f, 0.31f);
-            }
+            float center = feature.Lane * RaceSimulation.LaneWidth;
+            Strip(frame, guide, feature.Start + 0.3f, feature.Start + 0.64f, center - 0.78f, center + 0.78f, 0.026f);
+            Emit("Gadget gate", frame);
 
-            Emit("Gadget icon", batch, parent);
+            var pickup = new GameObject("Gadget pickup");
+            pickup.transform.SetParent(transform);
+            pickup.transform.position = gate.Offset(0, 0.87f);
+            pickups.Add(index, pickup.transform);
+
+            var icon = new Batch();
+            TrackPose prop = LevelPose(Vector3.zero, Vector3.forward);
+            AddBox(icon, guide, prop, 0, 0, 0, 0.55f, 0.46f, 0.54f);
+            AddBox(icon, metal, prop, 0, -0.05f, 0, 0.57f, 0.08f, 0.56f);
+            AddBox(icon, bright, prop, 0, 0.25f, 0, 0.58f, 0.09f, 0.57f);
+            AddBox(icon, bright, prop, 0, 0.045f, 0, 0.11f, 0.20f, 0.57f);
+            Emit("Gadget crate", icon, pickup.transform);
         }
 
-        public void UpdateVisuals(RaceSimulation race)
+        public void UpdateVisuals(RaceSimulation race, int localSlot = 0)
         {
             if (!built) Build();
             float clock = Mathf.Max(0, race.Clock);
             foreach (var pickup in pickups)
             {
-                bool ready = race.IsPickupReady(pickup.Key);
+                bool ready = race.IsPickupReady(pickup.Key, localSlot);
                 if (pickup.Value.gameObject.activeSelf != ready) pickup.Value.gameObject.SetActive(ready);
                 if (!ready) continue;
                 CourseFeature feature = RaceSimulation.Features[pickup.Key];

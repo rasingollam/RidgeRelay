@@ -13,11 +13,12 @@ namespace RidgeRelay
 {
     public sealed class PrivateRaceSession : MonoBehaviour
     {
-        private const string SessionType = "ridge-relay-race";
-        private const string HelloMessage = "ridge-relay/v1/hello";
-        private const string SeatsMessage = "ridge-relay/v1/seats";
-        private const string InputMessage = "ridge-relay/v1/input";
-        private const string StateMessage = "ridge-relay/v1/state";
+        private const string SessionType = "ridge-relay-race-v2";
+        private const string HelloMessage = "ridge-relay/v2/hello";
+        private const string SeatsMessage = "ridge-relay/v2/seats";
+        private const string InputMessage = "ridge-relay/v2/input";
+        private const string StateMessage = "ridge-relay/v2/state";
+        private const byte ProtocolVersion = 2;
         private const int SnapshotInterval = 3;
         private const int InputBytes = 2 * sizeof(int) + 1;
         private const int MaxQueuedInputs = 8;
@@ -279,7 +280,8 @@ namespace RidgeRelay
             if (CanControl)
             {
                 float now = Time.realtimeSinceStartup;
-                if (latest.AcknowledgedInput < anticipatedLaneInput && now < anticipatedLaneDeadline && local.Recovery <= 0)
+                if (latest.AcknowledgedInput < anticipatedLaneInput && now < anticipatedLaneDeadline &&
+                    local.Recovery <= 0 && RaceSimulation.CanChangeLane(local.Distance, local.Lane, anticipatedLane))
                     local.Lateral = Mathf.MoveTowards(priorLateral, anticipatedLane, Mathf.Min(seconds, 0.05f) * 5);
                 if (latest.AcknowledgedInput < anticipatedJumpInput && local.Recovery <= 0)
                 {
@@ -295,7 +297,7 @@ namespace RidgeRelay
             if (IsHost || manager == null || !manager.IsConnectedClient || messaging == null || now < nextHello) return;
             nextHello = now + 0.7f;
             using var writer = new FastBufferWriter(1, Allocator.Temp);
-            writer.WriteValueSafe((byte)1);
+            writer.WriteValueSafe(ProtocolVersion);
             messaging.SendNamedMessage(HelloMessage, NetworkManager.ServerClientId, writer);
         }
 
@@ -304,7 +306,7 @@ namespace RidgeRelay
             if (!IsHost || sender == NetworkManager.ServerClientId || !manager.ConnectedClients.ContainsKey(sender) ||
                 !reader.TryBeginRead(1)) return;
             reader.ReadValue(out byte protocol);
-            if (protocol != 1 || reader.Position != reader.Length) return;
+            if (protocol != ProtocolVersion || reader.Position != reader.Length) return;
 
             if (!peers.ContainsKey(sender))
             {
@@ -383,9 +385,13 @@ namespace RidgeRelay
             {
                 if (latest.AcknowledgedInput >= anticipatedLaneInput || now >= anticipatedLaneDeadline)
                     anticipatedLane = runner.Lane;
-                anticipatedLane = Mathf.Clamp(anticipatedLane + input.LaneDelta, -1, 1);
-                anticipatedLaneInput = sentInput;
-                anticipatedLaneDeadline = now + 0.35f;
+                int requestedLane = Mathf.Clamp(anticipatedLane + input.LaneDelta, -1, 1);
+                if (RaceSimulation.CanChangeLane(runner.Distance, runner.Lane, requestedLane))
+                {
+                    anticipatedLane = requestedLane;
+                    anticipatedLaneInput = sentInput;
+                    anticipatedLaneDeadline = now + 0.35f;
+                }
             }
 
             if (input.Jump && runner.Height <= 0.01f)
