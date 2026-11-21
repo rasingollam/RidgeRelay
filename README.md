@@ -45,9 +45,9 @@ Ridge Relay is a 3D footrace prototype for Unity. Race through Windmill Gorge fr
 
 - **Windows** — Choose **Ridge Relay → Build Windows**. The output is `Builds/Windows/Ridge Relay.exe`.
 - **Android** — Add Android Build Support, SDK & NDK Tools, and OpenJDK for this editor version in Unity Hub. Choose **Ridge Relay → Build Android APK** for a local test APK, or use **Build and Run** with a USB-connected Android device.
-- **Editor smoke test** — Choose **Ridge Relay → Run Play Mode Smoke Check**. It exercises the title menu, keyboard and simulated touch input, the camera, gadgets, results, and retry.
+- **Editor smoke test** — Choose **Ridge Relay → Run Play Mode Smoke Check**. It exercises the title menu, keyboard and simulated touch input, moving leg poses, the camera, gadgets, results, and retry.
 
-The Windows build, Android APK, and live Relay sessions still need runtime verification.
+The Windows player has been checked for moving animations, crowded racer separation and camera framing. Editor checks cover a full race and restart. The Android preview builds successfully; device performance and live Relay sessions still need runtime verification. After updating scripts while the Editor is open, let compilation finish and restart Play mode.
 
 ## Private races
 

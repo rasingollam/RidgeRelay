@@ -42,6 +42,10 @@ namespace RidgeRelay
         private readonly int powerLayer = -1;
         private float powerStarted = -10;
         private float previousCastTime;
+        private Vector2 displayOffset;
+        private bool recovering;
+
+        public Vector2 PresentationOffset => displayOffset;
 
         public RunnerView(int index)
         {
@@ -75,6 +79,10 @@ namespace RidgeRelay
                 animator = model.GetComponent<Animator>();
                 if (animator == null) animator = model.AddComponent<Animator>();
                 animator.runtimeAnimatorController = Controller;
+                // Couriers move between cameras and are briefly hidden on recovery.
+                // Their current pose must not depend on renderer visibility.
+                animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+                animator.keepAnimatorStateOnDisable = true;
                 powerLayer = animator.GetLayerIndex("Upper Body Power");
                 animator.applyRootMotion = false;
                 foreach (Renderer renderer in model.GetComponentsInChildren<Renderer>())
@@ -183,7 +191,7 @@ namespace RidgeRelay
             root.rotation = Quaternion.LookRotation(direction, Vector3.up);
         }
 
-        public void Show(RunnerState state, RacePhase phase, bool reducedMotion)
+        public void Show(RunnerState state, RacePhase phase, bool reducedMotion, Vector2 presentationOffset = default)
         {
             ApplyAppearance(state.FurColor);
             var pose = TrackView.Sample(state.Distance, state.Lateral);
@@ -194,7 +202,11 @@ namespace RidgeRelay
                 pullStarted = Time.time;
             }
             if (phase == RacePhase.Countdown) pullStarted = -10;
-            Vector3 position = pose.Position + Vector3.up * state.Height;
+            displayOffset = !shown || recovering || phase == RacePhase.Countdown ? presentationOffset :
+                Vector2.Lerp(displayOffset, presentationOffset, 1 - Mathf.Exp(-22 * Time.deltaTime));
+            recovering = state.Recovery > 0;
+            Vector3 position = pose.Position + Vector3.up * state.Height +
+                pose.Right * displayOffset.x + pose.Forward * displayOffset.y;
             if (state.FinishTime < 0 && Time.time - pullStarted < 0.28f)
                 position = Vector3.Lerp(pullOrigin, position, Mathf.SmoothStep(0, 1, (Time.time - pullStarted) / 0.28f));
             root.SetPositionAndRotation(

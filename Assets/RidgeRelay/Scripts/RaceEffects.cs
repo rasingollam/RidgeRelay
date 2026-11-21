@@ -18,9 +18,11 @@ namespace RidgeRelay
         private Mesh magnetField, shockField;
         private Material glowLine, glowMote, smoke;
         private bool initialized;
+        private IReadOnlyList<Vector2> runnerOffsets;
 
-        public void Present(RaceSimulation race, int localSlot, bool reducedMotion)
+        public void Present(RaceSimulation race, int localSlot, bool reducedMotion, IReadOnlyList<Vector2> presentationOffsets = null)
         {
+            runnerOffsets = presentationOffsets;
             if (race == null || race.Phase != RacePhase.Running)
             {
                 if (currentRace != null) Clear();
@@ -42,12 +44,12 @@ namespace RidgeRelay
                 RunnerState state = race.Runners[i];
                 RunnerEffects view = runners[i];
                 bool visible = state.Recovery <= 0 && state.FinishTime < 0;
-                TrackPose pose = TrackView.Sample(state.Distance, state.Lateral);
+                TrackPose pose = PresentationPose(state.Distance, state.Lateral, i);
                 PresentWarning(view, state, visible, i == localSlot, reducedMotion);
                 PresentShield(view, state, pose, visible, reducedMotion, time);
-                PresentWind(view, state, visible, reducedMotion, time);
-                PresentPower(view, race, state, pose, visible, race.HasIncomingMagnet(i), reducedMotion);
-                PresentLinks(view, race, i, visible, reducedMotion, time);
+                PresentWind(view, state, i, visible, reducedMotion, time);
+                PresentPower(view, race, state, i, pose, visible, race.HasIncomingMagnet(i), reducedMotion);
+                PresentLinks(view, race, i, visible, reducedMotion, time, runnerOffsets);
                 PresentResult(view, race, state, visible, reducedMotion, time);
             }
 
@@ -55,7 +57,17 @@ namespace RidgeRelay
             for (int i = 0; i < runners.Length; i++) runners[i].Remember(race.Runners[i]);
         }
 
-        private void PresentPower(RunnerEffects view, RaceSimulation race, RunnerState state,
+        private static Vector2 OffsetFor(IReadOnlyList<Vector2> offsets, int slot) =>
+            offsets != null && slot >= 0 && slot < offsets.Count ? offsets[slot] : Vector2.zero;
+
+        private TrackPose PresentationPose(float distance, float lateral, int slot)
+        {
+            TrackPose pose = TrackView.Sample(distance, lateral);
+            Vector2 offset = OffsetFor(runnerOffsets, slot);
+            return new TrackPose(pose.Offset(offset.x, 0, offset.y), pose.Forward, pose.Up, pose.Right);
+        }
+
+        private void PresentPower(RunnerEffects view, RaceSimulation race, RunnerState state, int slot,
             TrackPose pose, bool visible, bool magnetThreat, bool reducedMotion)
         {
             Gadget cast = state.CastPower;
@@ -98,9 +110,11 @@ namespace RidgeRelay
                 // The projectile follows the course even on long shots around bends.
                 TrackPose flight = TrackView.Sample(Mathf.Lerp(caster.Distance, state.Distance, progress),
                     Mathf.Lerp(caster.Lateral, state.Lateral, progress));
-                TrackPose landing = TrackView.Sample(state.Distance + 0.8f, state.Lateral);
+                TrackPose landing = PresentationPose(state.Distance + 0.8f, state.Lateral, slot);
+                Vector2 flightOffset = Vector2.Lerp(OffsetFor(runnerOffsets, state.PowerOwner), OffsetFor(runnerOffsets, slot), progress);
                 Vector3 rocketPosition = reducedMotion ? landing.Offset(0, 1.8f) :
-                    flight.Offset(0, 1.4f + Mathf.Sin(progress * Mathf.PI) * 0.8f);
+                    flight.Offset(flightOffset.x, 1.4f + Mathf.Sin(progress * Mathf.PI) * 0.8f +
+                        Mathf.Lerp(caster.Height, state.Height, progress), flightOffset.y);
                 view.Rocket.transform.SetPositionAndRotation(rocketPosition,
                     Quaternion.LookRotation(flight.Forward, flight.Up));
                 if (!view.PreviousRocket)
@@ -137,7 +151,7 @@ namespace RidgeRelay
         }
 
         private static void PresentLinks(RunnerEffects view, RaceSimulation race, int owner,
-            bool visible, bool reducedMotion, float time)
+            bool visible, bool reducedMotion, float time, IReadOnlyList<Vector2> offsets)
         {
             RunnerState caster = race.Runners[owner];
             bool magnetCast = caster.CastPower == Gadget.Magnet && caster.CastTime > 0;
@@ -157,8 +171,10 @@ namespace RidgeRelay
                     TrackPose pose = TrackView.Sample(Mathf.Lerp(caster.Distance, rival.Distance, t),
                         Mathf.Lerp(caster.Lateral, rival.Lateral, t));
                     float motion = reducedMotion ? 0 : Mathf.Sin(t * (magnetCast ? 7.5f : 120) + time * (magnetCast ? 9 : 22));
-                    Vector3 position = pose.Offset(motion * 0.18f * Mathf.Sin(t * Mathf.PI),
-                        0.85f + Mathf.Sin(t * Mathf.PI) * (magnetCast ? 0.65f : 0.12f) + motion * 0.08f);
+                    Vector2 separation = Vector2.Lerp(OffsetFor(offsets, owner), OffsetFor(offsets, target), t);
+                    Vector3 position = pose.Offset(separation.x + motion * 0.18f * Mathf.Sin(t * Mathf.PI),
+                        0.85f + Mathf.Lerp(caster.Height, rival.Height, t) +
+                        Mathf.Sin(t * Mathf.PI) * (magnetCast ? 0.65f : 0.12f) + motion * 0.08f, separation.y);
                     beam.SetPosition(point, position);
                 }
             }
@@ -208,7 +224,7 @@ namespace RidgeRelay
                 Quaternion.LookRotation(pose.Forward, pose.Up));
         }
 
-        private void PresentWind(RunnerEffects view, RunnerState state, bool visible, bool reducedMotion, float time)
+        private void PresentWind(RunnerEffects view, RunnerState state, int slot, bool visible, bool reducedMotion, float time)
         {
             bool powered = state.Boost > 0 || state.RouteBoost > 0;
             bool drafting = state.Slipstream >= RaceSimulation.SlipstreamActiveThreshold;
@@ -223,7 +239,7 @@ namespace RidgeRelay
                 strand.sharedMaterial = style;
                 float side = (i % 2 == 0 ? -1 : 1) * (i < 2 ? 0.64f : 0.45f);
                 float offset = reducedMotion ? 0.52f : 0.52f + Mathf.Repeat(time * 2.5f + i * 0.41f, 1.4f);
-                TrackPose pose = TrackView.Sample(state.Distance - offset, state.Lateral);
+                TrackPose pose = PresentationPose(state.Distance - offset, state.Lateral, slot);
                 Transform trail = strand.transform;
                 trail.SetPositionAndRotation(pose.Offset(side, (i < 2 ? 0.35f : 0.64f) + state.Height * 0.72f),
                     Quaternion.LookRotation(pose.Forward, pose.Up));

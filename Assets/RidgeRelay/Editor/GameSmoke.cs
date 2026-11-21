@@ -217,6 +217,17 @@ namespace RidgeRelay.Editor
             yield return () => race.Phase == RacePhase.Running;
 
             RunnerState runner = race.Runners[0];
+            currentStep = "checking running leg motion";
+            yield return () => animator.GetCurrentAnimatorStateInfo(0).IsName("Run") && !animator.IsInTransition(0);
+            Transform thigh = Array.Find(animator.GetComponentsInChildren<Transform>(), bone => bone.name == "thigh.L");
+            Require(thigh != null, "The courier's animated leg bone is missing.");
+            Quaternion firstLegPose = thigh.localRotation;
+            float motionAt = race.Clock;
+            yield return () => race.Clock >= motionAt + 0.11f;
+            bool legMoved = Quaternion.Angle(firstLegPose, thigh.localRotation) > 3;
+            yield return () => race.Clock >= motionAt + 0.23f;
+            Require(legMoved || Quaternion.Angle(firstLegPose, thigh.localRotation) > 3,
+                "The courier must change leg poses while running.");
             Vector3 coursePosition = TrackView.Sample(runner.Distance, runner.Lateral).Position;
             Vector3 toRunner = coursePosition - camera.transform.position;
             Require(toRunner.magnitude > 3 && Vector3.Dot(camera.transform.forward, toRunner) > 0,

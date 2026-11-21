@@ -11,6 +11,7 @@ namespace RidgeRelay
         private readonly RaceCommand[] commands = new RaceCommand[RaceSimulation.Entrants];
         private readonly RaceBot[] bots = new RaceBot[RaceSimulation.Entrants - 1];
         private readonly RunnerView[] views = new RunnerView[RaceSimulation.Entrants];
+        private readonly Vector2[] runnerOffsets = new Vector2[RaceSimulation.Entrants];
         private readonly RaceSimulation preview = new RaceSimulation();
         private TrackView track;
         private RaceHud hud;
@@ -25,6 +26,7 @@ namespace RidgeRelay
         private bool displayingOnline;
         private float cameraShoulder;
         private float shoulderTarget;
+        private float cameraCrowd;
         private VolumeProfile lookProfile;
         private Material skyMaterial;
 
@@ -217,7 +219,7 @@ namespace RidgeRelay
             ShowRunners(visible);
             for (int i = 0; i < views.Length; i++) views[i].MarkLocal(i == slot);
             track.UpdateVisuals(visible, slot);
-            effects.Present(visible == preview ? null : visible, slot, hud.ReducedMotion);
+            effects.Present(visible == preview ? null : visible, slot, hud.ReducedMotion, runnerOffsets);
             if (visible == preview)
             {
                 for (int i = 1; i < views.Length; i++) views[i].SetVisible(false);
@@ -235,10 +237,13 @@ namespace RidgeRelay
             }
             float nearest = float.PositiveInfinity;
             int closeRival = -1;
+            int crowdedRivals = 0;
             for (int i = 0; i < views.Length; i++)
             {
                 RunnerState rival = visible.Runners[i];
                 float separation = Mathf.Abs(rival.Distance - player.Distance);
+                if (i != slot && rival.Recovery <= 0 && rival.FinishTime < 0 && separation < 1.6f &&
+                    Mathf.Abs(rival.Lateral - player.Lateral) < 0.8f) crowdedRivals++;
                 if (i != slot && rival.Recovery <= 0 && rival.FinishTime < 0 && separation < 4 &&
                     separation < nearest && Mathf.Abs(rival.Lateral - player.Lateral) < 1.2f)
                 {
@@ -251,30 +256,35 @@ namespace RidgeRelay
                 shoulderTarget = visible.Runners[closeRival].Lateral > player.Lateral ? -1.25f : 1.25f;
             cameraShoulder = Mathf.Lerp(cameraShoulder, shoulderTarget,
                 1 - Mathf.Exp(-4 * Time.deltaTime));
+            cameraCrowd = Mathf.Lerp(cameraCrowd, Mathf.Clamp01(crowdedRivals * 0.5f),
+                1 - Mathf.Exp(-5 * Time.deltaTime));
             MoveCamera(player, snapCamera || player.Recovery >= 0.84f);
             snapCamera = false;
         }
 
         private void ShowRunners(RaceSimulation state)
         {
+            RacerPresentationLayout.Resolve(state.Runners, runnerOffsets);
             for (int i = 0; i < views.Length; i++)
-                views[i].Show(state.Runners[i], state.Phase, hud.ReducedMotion);
+            {
+                views[i].Show(state.Runners[i], state.Phase, hud.ReducedMotion, runnerOffsets[i]);
+                runnerOffsets[i] = views[i].PresentationOffset;
+            }
         }
 
         private void MoveCamera(RunnerState runner, bool snap)
         {
             float tunnel = TrackView.TunnelCameraBlend(runner.Distance);
-            var rear = TrackView.Sample(runner.Distance - Mathf.Lerp(3.6f, 3.9f, tunnel),
+            float crowd = cameraCrowd * (1 - tunnel);
+            var rear = TrackView.Sample(runner.Distance - Mathf.Lerp(Mathf.Lerp(3.6f, 4.4f, crowd), 3.9f, tunnel),
                 runner.Lateral * Mathf.Lerp(0.53f, 1f, tunnel));
             var anchor = TrackView.Sample(runner.Distance,
                 runner.Lateral * Mathf.Lerp(0.25f, 1f, tunnel));
-            var ahead = TrackView.Sample(runner.Distance + Mathf.Lerp(7f, 5f, tunnel),
+            var ahead = TrackView.Sample(runner.Distance + Mathf.Lerp(Mathf.Lerp(7f, 4f, crowd), 5f, tunnel),
                 runner.Lateral * Mathf.Lerp(0.12f, 1f, tunnel));
-            Vector3 targetPosition = rear.Position;
+            Vector3 targetPosition = rear.Position + rear.Up * Mathf.Lerp(Mathf.Lerp(1.85f, 2.1f, crowd), 1.9f, tunnel);
             targetPosition += rear.Right * cameraShoulder * (1 - tunnel);
-            targetPosition.y = Mathf.Max(rear.Position.y + Mathf.Lerp(1.85f, 1.9f, tunnel),
-                anchor.Position.y + Mathf.Lerp(1.4f, 1.3f, tunnel));
-            targetPosition.y += runner.Height * 0.16f * (1 - tunnel);
+            targetPosition.y += runner.Height * 0.2f;
             Vector3 aim = Vector3.Lerp(ahead.Position, anchor.Position,
                 Mathf.Abs(cameraShoulder) * 0.13f) + Vector3.up * 0.8f;
             float blend = snap ? 1 : 1 - Mathf.Exp(-14 * Time.deltaTime);
@@ -283,7 +293,8 @@ namespace RidgeRelay
             chase.transform.rotation = Quaternion.Slerp(chase.transform.rotation, heading, blend);
             bool accelerating = runner.Boost > 0 || runner.RouteBoost > 0 ||
                 runner.Slipstream >= RaceSimulation.SlipstreamActiveThreshold;
-            float fov = !hud.ReducedMotion && accelerating ? Mathf.Lerp(57, 55, tunnel) : Mathf.Lerp(52, 55, tunnel);
+            float fov = !hud.ReducedMotion && accelerating ? Mathf.Lerp(57, 55, tunnel) :
+                Mathf.Lerp(Mathf.Lerp(52, 56, crowd), 55, tunnel);
             chase.fieldOfView = Mathf.Lerp(chase.fieldOfView, fov, blend);
         }
 
