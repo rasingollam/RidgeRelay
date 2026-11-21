@@ -121,6 +121,7 @@ namespace RidgeRelay
             SetVisible(primary, !privateMenu);
             SetVisible(motion, !privateMenu);
             SetVisible(mirror, !privateMenu);
+            SetVisible(fur, offlineHome);
             SetActionEnabled(primary, !onlineResults || !onlineBusy, Mint, Ink);
             SetActionEnabled(leavePause, !onlineBusy, Panel, Coral);
 

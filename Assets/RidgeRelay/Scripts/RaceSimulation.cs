@@ -28,6 +28,7 @@ namespace RidgeRelay
         public float Height { get; internal set; }
         public Gadget Held { get; internal set; }
         public int Place { get; internal set; }
+        public int FurColor { get; internal set; }
         public float FinishTime { get; internal set; } = -1;
         public float Shield { get; internal set; }
         public float Boost { get; internal set; }
@@ -47,6 +48,10 @@ namespace RidgeRelay
         public float CastTime { get; internal set; }
         public Gadget ImpactPower { get; internal set; }
         public float ImpactTime { get; internal set; }
+        public int PowerResolution { get; internal set; }
+        public int LastPowerHits { get; internal set; }
+        public Gadget LastResolvedPower { get; internal set; }
+        public Gadget LastUsedPower { get; internal set; }
         public float ItemCooldown { get; internal set; }
         public float RouteBoost { get; internal set; }
         public int PulseHits { get; internal set; }
@@ -106,6 +111,7 @@ namespace RidgeRelay
         public const float StepSeconds = 1f / 60;
         public const float CourseLength = 655;
         public const int Entrants = 4;
+        public const int FurColorCount = 6;
         public const float LaneWidth = 2;
         public const float BaseSpeed = 10;
         public const float SlipstreamActiveThreshold = 0.85f;
@@ -226,7 +232,8 @@ namespace RidgeRelay
                 int lane = i % 3 - 1;
                 runners[i] = new RunnerState
                 {
-                    Lane = lane, Lateral = lane, Distance = i == 3 ? -2 : 0, Place = i + 1
+                    Lane = lane, Lateral = lane, Distance = i == 3 ? -2 : 0, Place = i + 1,
+                    FurColor = (i + 1) % FurColorCount
                 };
             }
         }
@@ -316,7 +323,7 @@ namespace RidgeRelay
                 case Gadget.Rocket: return FindLeader(index, false) >= 0;
                 case Gadget.Magnet:
                     for (int i = 0; i < Entrants; i++)
-                        if (i != index && runners[i].FinishTime < 0) return true;
+                        if (IsMagnetTarget(index, i)) return true;
                     return false;
                 case Gadget.Shock:
                     for (int i = 0; i < Entrants; i++)
@@ -330,7 +337,7 @@ namespace RidgeRelay
         public bool HasIncomingMagnet(int slot)
         {
             for (int i = 0; i < Entrants; i++)
-                if (i != slot && runners[i].CastPower == Gadget.Magnet && runners[i].CastTime > 0)
+                if (runners[i].CastPower == Gadget.Magnet && runners[i].CastTime > 0 && IsMagnetTarget(i, slot))
                     return true;
             return false;
         }
@@ -361,6 +368,13 @@ namespace RidgeRelay
             return along * along + lateral * lateral <= radius * radius;
         }
 
+        public bool IsWithinShock(int owner, int target) =>
+            owner != target && CanTakePowerHit(runners[target]) && WithinShockRadius(runners[owner], runners[target]);
+
+        public bool IsMagnetTarget(int owner, int target) =>
+            owner != target && CanTakePowerHit(runners[target]) &&
+            runners[target].Distance > runners[owner].Distance + 0.05f;
+
         private bool TryCastPower(int owner, Gadget gadget)
         {
             if (gadget == Gadget.Magnet || gadget == Gadget.Shock)
@@ -390,13 +404,20 @@ namespace RidgeRelay
             target.PowerWarning = Decay(target.PowerWarning);
             if (target.PowerWarning > 0) return;
 
+            int owner = target.PowerOwner;
             target.IncomingPower = Gadget.None;
             target.PowerOwner = -1;
-            if (!CanTakePowerHit(target)) return;
+            if (!CanTakePowerHit(target))
+            {
+                CompletePower(owner, Gadget.Rocket, 0);
+                return;
+            }
 
+            bool blocked = target.Shield > 0;
             target.ImpactPower = target.Shield > 0 ? Gadget.ShellFilm : Gadget.Rocket;
             target.ImpactTime = 0.55f;
             ApplyPowerHit(target);
+            CompletePower(owner, Gadget.Rocket, blocked ? 0 : 1);
         }
 
         public float IncomingShockTime(int slot)
@@ -416,6 +437,7 @@ namespace RidgeRelay
             RunnerState caster = runners[owner];
             if (caster.CastPower != Gadget.Shock || caster.CastTime > 0) return;
             caster.CastPower = Gadget.None;
+            int hits = 0;
             for (int i = 0; i < Entrants; i++)
             {
                 RunnerState target = runners[i];
@@ -423,8 +445,10 @@ namespace RidgeRelay
                     !WithinShockRadius(caster, target)) continue;
                 target.ImpactPower = target.Shield > 0 ? Gadget.ShellFilm : Gadget.Shock;
                 target.ImpactTime = 0.55f;
+                if (target.Shield <= 0) hits++;
                 ApplyPowerHit(target);
             }
+            CompletePower(owner, Gadget.Shock, hits);
         }
 
         private void ResolveMagnet(int owner)
@@ -432,10 +456,11 @@ namespace RidgeRelay
             RunnerState caster = runners[owner];
             if (caster.CastPower != Gadget.Magnet || caster.CastTime > 0) return;
             caster.CastPower = Gadget.None;
+            int hits = 0;
             for (int i = 0; i < Entrants; i++)
             {
                 RunnerState target = runners[i];
-                if (i == owner || target.FinishTime >= 0 || target.Recovery > 0) continue;
+                if (!IsMagnetTarget(owner, i)) continue;
                 target.ImpactTime = 0.55f;
                 if (target.Shield > 0)
                 {
@@ -444,6 +469,7 @@ namespace RidgeRelay
                     continue;
                 }
                 target.ImpactPower = Gadget.Magnet;
+                hits++;
                 float floor = Checkpoints[target.Checkpoint];
                 int lane = (int)Math.Round(target.Lateral);
                 foreach (CourseFeature feature in Features)
@@ -455,6 +481,14 @@ namespace RidgeRelay
                 target.Distance = Math.Max(Math.Min(floor, target.Distance), target.Distance - 5f);
                 ApplyPowerHit(target);
             }
+            CompletePower(owner, Gadget.Magnet, hits);
+        }
+
+        private void CompletePower(int owner, Gadget power, int hits)
+        {
+            runners[owner].LastResolvedPower = power;
+            runners[owner].LastPowerHits = hits;
+            runners[owner].PowerResolution++;
         }
 
         private void Move(int index, RaceCommand command)
@@ -509,6 +543,7 @@ namespace RidgeRelay
                 }
                 if (used)
                 {
+                    runner.LastUsedPower = runner.Held;
                     runner.Held = Gadget.None;
                     runner.ItemCooldown = UseCooldown;
                 }

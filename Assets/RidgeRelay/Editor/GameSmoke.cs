@@ -281,6 +281,13 @@ namespace RidgeRelay.Editor
             Press();
             yield return () => runner.Held == Gadget.Magnet || runner.Distance > 88;
             Require(runner.Held == Gadget.Magnet && HasLabel(hud, "MAGNET"), "The second gate should award Magnet.");
+            // The faster local racer may be leading. Arrange a forward target
+            // explicitly so this input check exercises the forward-only Magnet.
+            RunnerState magnetTarget = race.Runners[1];
+            typeof(RunnerState).GetProperty(nameof(RunnerState.Distance)).SetValue(magnetTarget, runner.Distance + 8);
+            typeof(RunnerState).GetProperty(nameof(RunnerState.Recovery)).SetValue(magnetTarget, 0f);
+            typeof(RunnerState).GetProperty(nameof(RunnerState.Shield)).SetValue(magnetTarget, 0f);
+            yield return null;
             Vector2 magnetButton = ControlPosition(hud, "MAGNET");
             SetTouch(1, TouchPhase.Began, magnetButton);
             yield return () => runner.CastPower == Gadget.Magnet && runner.CastTime > 0;

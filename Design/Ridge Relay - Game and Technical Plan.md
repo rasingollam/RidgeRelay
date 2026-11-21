@@ -78,9 +78,21 @@ The first implementation ticket is the Android chase-camera course using primiti
 
 ## Competitive iteration
 
+### Visual target and preview status
+
+The accepted visual target is the gameplay reference set in `ArtSource/References`, particularly `Gameplay-Race.png`, `Gameplay-Shock.png`, and `Gameplay-Finish.png`. These are generated concept images. Matching their character quality, materials, scenery, lighting, effects and screen composition remains the goal. A successful compile or a playable prototype does not establish that visual match.
+
+The first visual preview adds a continuous skinned courier, short fur geometry, facial blinks, fourteen animation clips, selectable fur colors, painted surfaces, a sky panorama, leafy trees, waterfalls, planted shelves, bridge pennants, an arched tunnel and clearer power graphics. Unity 6000.6.10f1 play checks cover the chase and tunnel cameras, finish waiting and celebration, power effects and gestures, and a full race with keyboard and simulated touch input. The scenery scan found zero lane intrusions across 113 checked meshes. An ARM64 Android preview builds successfully with version code 7.
+
+Further visual work is required before calling the reference goal complete. Priorities are the character's fur and proportions, environment composition and material scale, animation contact and weight, richer finish staging, and final HUD and effect polish. The current courier has 69,052 triangles; distance-based detail reduction and real-device profiling are still needed. Editor captures are useful for comparison, but the final acceptance also needs native player and mobile runtime checks. No Android device was connected during this preview build.
+
+Historical concept images show the earlier Magnet wording. The implemented rule is forward-only as specified below.
+
 The opening gate gives every racer a Tailwind. Later two-lane gates award one weighted pickup per racer. A rival taking a pickup leaves the gate available for the other racers. Position affects the odds, and each racer can carry one gadget at a time.
 
 Following a nearby rival in the same lane charges Slipstream. Pulse Shot requires a rival ahead in that lane and gives a 0.65-second warning. Changing lanes, jumping, or using Shell Film can defend against a shot. Bots use the same rules and have seeded reaction delays.
+
+Magnet pulls active rivals ahead of its caster back by up to five meters. Racers behind or alongside are unaffected. Its warning and ribbons follow the current eligible racers, and eligibility is checked again when the windup ends. With nobody ahead the item remains held. Shell Film blocks one pull. Rewinds stop at checkpoints, gaps and tunnel transitions. Rocket homes onto the leading eligible rival ahead. Shock affects eligible rivals inside its six-meter boundary, with range checked when it fires.
 
 Windmill Gorge now has a crest, a downhill shortcut with a boost reward, and a split tunnel. Commit to a tunnel route before the divider. The narrow right passage grants a 12% speed bonus and has a hurdle to time. The wide left passage gives two lanes to maneuver.
 

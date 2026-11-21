@@ -2,9 +2,9 @@
 
 Ridge Relay is a 3D footrace prototype for Unity. Race through Windmill Gorge from a behind-the-runner camera, switch lanes to avoid obstacles, jump gaps, and use gadgets to gain an edge.
 
-![Chase-camera concept art for Windmill Gorge](Design/Concepts/chase-camera.png)
+![Target gameplay art for Windmill Gorge](ArtSource/References/Gameplay-Race.png)
 
-*Concept art for the chase-camera view.*
+*Target art reference. The playable prototype is undergoing a visual upgrade and does not yet match this image.*
 
 ## What’s in the project
 
@@ -12,6 +12,8 @@ Ridge Relay is a 3D footrace prototype for Unity. Race through Windmill Gorge fr
 - Keyboard and touch controls, mirrored touch buttons, and a reduced-motion setting.
 - Seven gadgets, checkpoint recovery, race results, and a locally saved best time.
 - Editable Blender sources for the rigged courier, environment and pickups.
+- Six selectable fur colors, a blue local-player backpack, terrain running poses and upper-body power gestures.
+- Painted surfaces, an arched tunnel, planted canyon shelves, a river bridge and animated waterfalls.
 - Private races with join codes using Unity Multiplayer Services, Relay and Netcode for GameObjects. A linked Unity Cloud project is required for online play.
 
 ## Run in Unity
@@ -32,7 +34,7 @@ Ridge Relay is a 3D footrace prototype for Unity. Race through Windmill Gorge fr
 - **Slipstream** builds while you follow close behind a rival in the same lane. Fill the meter for a short speed burst.
 - Finished racers move onto a terrace beyond the finish line, jump and wave, and display their finishing position. The camera moves to a side view while the remaining racers finish.
 - **Tailwind** gives an immediate burst. **Pulse Shot** warns a rival ahead in your lane before slowing them. Change lanes, jump, or use **Shell Film** to defend. **Bristle Pad** leaves a hazard for the runners behind you.
-- **Magnet** pulls every active rival back across the course. Shell Film blocks it.
+- **Magnet** pulls active rivals ahead of the caster back. Racers behind and alongside are unaffected. Targets are checked again when the pull fires. Shell Film blocks it.
 - **Rocket** locks onto the leader and follows lane changes. Use Shell Film before it lands.
 - **Shock** stuns nearby rivals inside the blue ring. Leave the radius or shield before it fires.
 - Every lane can collect from a pickup gate. The first two gates award Tailwind and Magnet. Later gates give trailing racers better odds of drawing comeback gadgets. An unusable held power can be replaced at the next gate.

@@ -1,4 +1,6 @@
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 namespace RidgeRelay
 {
@@ -23,6 +25,8 @@ namespace RidgeRelay
         private bool displayingOnline;
         private float cameraShoulder;
         private float shoulderTarget;
+        private VolumeProfile lookProfile;
+        private Material skyMaterial;
 
         private void Awake()
         {
@@ -31,27 +35,61 @@ namespace RidgeRelay
                 SystemInfo.systemMemorySize > 0 && SystemInfo.systemMemorySize < 3800 ? 30 : 60;
             bestTime = PlayerPrefs.GetFloat(BestTimeKey, -1);
             RenderSettings.ambientLight = new Color(0.66f, 0.64f, 0.72f);
+            RenderSettings.ambientMode = AmbientMode.Trilight;
+            RenderSettings.ambientSkyColor = new Color(0.56f, 0.65f, 0.78f);
+            RenderSettings.ambientEquatorColor = new Color(0.48f, 0.54f, 0.61f);
+            RenderSettings.ambientGroundColor = new Color(0.38f, 0.40f, 0.44f);
             RenderSettings.fog = true;
-            RenderSettings.fogColor = new Color(0.77f, 0.77f, 0.91f);
+            RenderSettings.fogColor = new Color(0.70f, 0.80f, 0.90f);
             RenderSettings.fogMode = FogMode.Linear;
-            RenderSettings.fogStartDistance = 48;
-            RenderSettings.fogEndDistance = 155;
+            RenderSettings.fogStartDistance = 85;
+            RenderSettings.fogEndDistance = 280;
 
             var sun = new GameObject("Canyon sunlight").AddComponent<Light>();
             sun.type = LightType.Directional;
             sun.color = new Color(1f, 0.91f, 0.76f);
-            sun.intensity = 1.5f;
+            sun.intensity = 1.05f;
             sun.shadows = LightShadows.Soft;
+            sun.shadowStrength = 0.78f;
             sun.transform.rotation = Quaternion.Euler(48, -38, 0);
+            var fill = new GameObject("Cool sky fill").AddComponent<Light>();
+            fill.type = LightType.Directional;
+            fill.color = new Color(0.68f, 0.80f, 1);
+            fill.intensity = 0.25f;
+            fill.shadows = LightShadows.None;
+            fill.transform.rotation = Quaternion.Euler(30, 145, 0);
 
             chase = new GameObject("Chase camera").AddComponent<Camera>();
             chase.tag = "MainCamera";
             chase.gameObject.AddComponent<AudioListener>();
-            chase.clearFlags = CameraClearFlags.SolidColor;
+            Shader skyShader = Shader.Find("RidgeRelay/Canyon Sky");
+            if (skyShader != null)
+            {
+                skyMaterial = new Material(skyShader);
+                Texture2D sky=Resources.Load<Texture2D>("RidgeRelay/Surfaces/DaySky");
+                if(sky!=null){skyMaterial.SetTexture("_DaySky",sky);skyMaterial.SetFloat("_UseTexture",1);}
+                RenderSettings.skybox = skyMaterial;
+            }
+            chase.clearFlags = CameraClearFlags.Skybox;
             chase.backgroundColor = new Color(0.56f, 0.71f, 0.91f);
-            chase.farClipPlane = 180;
+            chase.farClipPlane = 350;
             chase.nearClipPlane = 0.15f;
             chase.fieldOfView = 55;
+            chase.GetUniversalAdditionalCameraData().renderPostProcessing = true;
+            lookProfile = ScriptableObject.CreateInstance<VolumeProfile>();
+            var tonemapping = lookProfile.Add<Tonemapping>(true);
+            tonemapping.mode.Override(TonemappingMode.ACES);
+            var bloom = lookProfile.Add<Bloom>(true);
+            bloom.intensity.Override(0.18f);
+            bloom.threshold.Override(1.05f);
+            bloom.scatter.Override(0.65f);
+            var color = lookProfile.Add<ColorAdjustments>(true);
+            color.contrast.Override(2);
+            color.saturation.Override(3);
+            var volume = new GameObject("Canyon color grade").AddComponent<Volume>();
+            volume.transform.SetParent(transform, false);
+            volume.isGlobal = true;
+            volume.sharedProfile = lookProfile;
 
             track = new GameObject("Windmill Gorge").AddComponent<TrackView>();
             track.Build();
@@ -71,13 +109,20 @@ namespace RidgeRelay
 
             for (int i = 0; i < views.Length; i++) views[i] = new RunnerView(i);
             ShowRunners(preview);
-            MoveCamera(preview.Runners[0], true);
+            MovePreviewCamera(true);
+        }
+
+        private void OnDestroy()
+        {
+            if (lookProfile != null) Destroy(lookProfile);
+            if (skyMaterial != null) Destroy(skyMaterial);
         }
 
         private void StartRace()
         {
             if (online.Connected || online.Busy) return;
             race = new RaceSimulation(waitForAll: true, relaxedBots: true);
+            race.Runners[0].FurColor = CourierAppearance.Selected;
             accumulator = 0;
             snapCamera = true;
             audioFeedback.ResetRace();
@@ -111,6 +156,7 @@ namespace RidgeRelay
 
         private void Update()
         {
+            online.FurColor = CourierAppearance.Selected;
             if (online.Connected || online.Busy)
             {
                 displayingOnline = true;
@@ -163,17 +209,27 @@ namespace RidgeRelay
         {
             bool paused = !displayingOnline && hud.IsPaused;
             foreach (RunnerView view in views) view.SetPaused(paused);
+            effects.SetPaused(paused);
             if (paused) return;
             RaceSimulation visible = (displayingOnline ? online.DisplayRace : race) ?? preview;
+            preview.Runners[0].FurColor = CourierAppearance.Selected;
             int slot = displayingOnline ? Mathf.Clamp(online.LocalSlot, 0, RaceSimulation.Entrants - 1) : 0;
             ShowRunners(visible);
             for (int i = 0; i < views.Length; i++) views[i].MarkLocal(i == slot);
             track.UpdateVisuals(visible, slot);
             effects.Present(visible == preview ? null : visible, slot, hud.ReducedMotion);
+            if (visible == preview)
+            {
+                for (int i = 1; i < views.Length; i++) views[i].SetVisible(false);
+                MovePreviewCamera(snapCamera);
+                views[0].FaceCamera(chase);
+                snapCamera = false;
+                return;
+            }
             RunnerState player = visible.Runners[slot];
             if (player.FinishTime >= 0)
             {
-                MoveFinishCamera(snapCamera);
+                MoveFinishCamera(visible, snapCamera);
                 snapCamera = false;
                 return;
             }
@@ -208,16 +264,16 @@ namespace RidgeRelay
         private void MoveCamera(RunnerState runner, bool snap)
         {
             float tunnel = TrackView.TunnelCameraBlend(runner.Distance);
-            var rear = TrackView.Sample(runner.Distance - Mathf.Lerp(5.7f, 3.9f, tunnel),
+            var rear = TrackView.Sample(runner.Distance - Mathf.Lerp(3.6f, 3.9f, tunnel),
                 runner.Lateral * Mathf.Lerp(0.53f, 1f, tunnel));
             var anchor = TrackView.Sample(runner.Distance,
                 runner.Lateral * Mathf.Lerp(0.25f, 1f, tunnel));
-            var ahead = TrackView.Sample(runner.Distance + Mathf.Lerp(8f, 5f, tunnel),
+            var ahead = TrackView.Sample(runner.Distance + Mathf.Lerp(7f, 5f, tunnel),
                 runner.Lateral * Mathf.Lerp(0.12f, 1f, tunnel));
             Vector3 targetPosition = rear.Position;
             targetPosition += rear.Right * cameraShoulder * (1 - tunnel);
-            targetPosition.y = Mathf.Max(rear.Position.y + Mathf.Lerp(2.5f, 1.9f, tunnel),
-                anchor.Position.y + Mathf.Lerp(1.8f, 1.3f, tunnel));
+            targetPosition.y = Mathf.Max(rear.Position.y + Mathf.Lerp(1.85f, 1.9f, tunnel),
+                anchor.Position.y + Mathf.Lerp(1.4f, 1.3f, tunnel));
             targetPosition.y += runner.Height * 0.16f * (1 - tunnel);
             Vector3 aim = Vector3.Lerp(ahead.Position, anchor.Position,
                 Mathf.Abs(cameraShoulder) * 0.13f) + Vector3.up * 0.8f;
@@ -227,20 +283,38 @@ namespace RidgeRelay
             chase.transform.rotation = Quaternion.Slerp(chase.transform.rotation, heading, blend);
             bool accelerating = runner.Boost > 0 || runner.RouteBoost > 0 ||
                 runner.Slipstream >= RaceSimulation.SlipstreamActiveThreshold;
-            float fov = !hud.ReducedMotion && accelerating ? Mathf.Lerp(59, 55, tunnel) : 55;
+            float fov = !hud.ReducedMotion && accelerating ? Mathf.Lerp(57, 55, tunnel) : Mathf.Lerp(52, 55, tunnel);
             chase.fieldOfView = Mathf.Lerp(chase.fieldOfView, fov, blend);
         }
 
-        private void MoveFinishCamera(bool snap)
+        private void MoveFinishCamera(RaceSimulation state, bool snap)
         {
-            TrackPose finish = TrackView.Sample(RaceSimulation.CourseLength + 7);
-            Vector3 position = finish.Offset(13.8f, 4.1f, -7);
-            Vector3 aim = finish.Offset(5.2f, 1.0f, -0.5f);
+            int finishers = 0;
+            foreach (RunnerState runner in state.Runners)
+                if (runner.FinishTime >= 0) finishers++;
+            float group = Mathf.Clamp01((finishers - 1) / 3f);
+            float center = 5 + (finishers - 1) * 0.8f;
+            TrackPose finish = TrackView.Sample(RaceSimulation.CourseLength + 8);
+            Vector3 position = finish.Offset(center + Mathf.Lerp(3.6f, 5, group),
+                2.4f, Mathf.Lerp(3.4f, 5, group));
+            Vector3 aim = finish.Offset(center, 0.9f);
             float blend = snap ? 1 : 1 - Mathf.Exp(-2.8f * Time.deltaTime);
             chase.transform.position = Vector3.Lerp(chase.transform.position, position, blend);
             chase.transform.rotation = Quaternion.Slerp(chase.transform.rotation,
                 Quaternion.LookRotation(aim - chase.transform.position, Vector3.up), blend);
-            chase.fieldOfView = Mathf.Lerp(chase.fieldOfView, 57, blend);
+            chase.fieldOfView = Mathf.Lerp(chase.fieldOfView, Mathf.Lerp(42, 49, group), blend);
+        }
+
+        private void MovePreviewCamera(bool snap)
+        {
+            TrackPose hero = TrackView.Sample(0, -1);
+            Vector3 position = hero.Offset(-0.5f, 1.25f, -3.4f);
+            Vector3 aim = hero.Offset(0.65f, 0.78f);
+            float blend = snap ? 1 : 1 - Mathf.Exp(-4 * Time.deltaTime);
+            chase.transform.position = Vector3.Lerp(chase.transform.position, position, blend);
+            chase.transform.rotation = Quaternion.Slerp(chase.transform.rotation,
+                Quaternion.LookRotation(aim - chase.transform.position, Vector3.up), blend);
+            chase.fieldOfView = Mathf.Lerp(chase.fieldOfView, 38, blend);
         }
     }
 }

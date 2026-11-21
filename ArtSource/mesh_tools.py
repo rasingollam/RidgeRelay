@@ -27,19 +27,21 @@ def box(name, at, size, surface, bevel=0.025):
     if bevel > 0:
         modifier = obj.modifiers.new("Edge Bevel", "BEVEL")
         modifier.width = bevel
-        modifier.segments = 1
+        modifier.segments = 3
         bpy.ops.object.modifier_apply(modifier=modifier.name)
     obj.data.materials.append(surface)
     return obj
 
 
-def sphere(name, at, size, surface, segments=12, rings=8):
+def sphere(name, at, size, surface, segments=20, rings=12):
     bpy.ops.mesh.primitive_uv_sphere_add(segments=segments, ring_count=rings,
                                         radius=1, location=at)
     obj = bpy.context.object
     obj.name = name
     obj.scale = size
     obj.data.materials.append(surface)
+    for polygon in obj.data.polygons:
+        polygon.use_smooth = True
     return obj
 
 

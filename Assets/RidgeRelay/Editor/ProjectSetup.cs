@@ -20,6 +20,7 @@ namespace RidgeRelay.Editor
         {
             PlayerSettings.productName = "Ridge Relay";
             PlayerSettings.companyName = "Ridge Relay";
+            PlayerSettings.colorSpace = ColorSpace.Linear;
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.ridgerelay.game");
             PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
             PlayerSettings.allowedAutorotateToLandscapeLeft = true;
@@ -51,6 +52,24 @@ namespace RidgeRelay.Editor
             }
 
             const string litMaterialPath = "Assets/RidgeRelay/Track Surface.mat";
+            pipeline.supportsHDR = true;
+            pipeline.msaaSampleCount = 4;
+            var pipelineSettings = new SerializedObject(pipeline);
+            pipelineSettings.FindProperty("m_SoftShadowsSupported").boolValue = true;
+            pipelineSettings.ApplyModifiedPropertiesWithoutUndo();
+            pipeline.shadowDistance = 45;
+            pipeline.mainLightShadowmapResolution = 2048;
+            pipeline.shadowDepthBias = 0.4f;
+            pipeline.shadowNormalBias = 0.3f;
+            EditorUtility.SetDirty(pipeline);
+            var rendererData = AssetDatabase.LoadAssetAtPath<UniversalRendererData>("Assets/RidgeRelay/Mobile Renderer.asset");
+            if (rendererData != null)
+            {
+                rendererData.postProcessData = AssetDatabase.LoadAssetAtPath<PostProcessData>(
+                    UniversalRenderPipelineAsset.packagePath + "/Runtime/Data/PostProcessData.asset");
+                ResourceReloader.ReloadAllNullIn(rendererData, UniversalRenderPipelineAsset.packagePath);
+                EditorUtility.SetDirty(rendererData);
+            }
             if (AssetDatabase.LoadAssetAtPath<Material>(litMaterialPath) == null)
             {
                 var shader = Shader.Find("Universal Render Pipeline/Lit");

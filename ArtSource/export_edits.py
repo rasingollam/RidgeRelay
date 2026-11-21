@@ -41,5 +41,9 @@ if __name__ == "__main__":
         export_environment(("Windmill", "WindGate", "Cliff", "Chevrons", "Rail"))
     elif source == "Gadgets.blend":
         export_environment(("PickupTailwind", "PickupBristlePad", "PickupShellFilm"))
+    elif source == "Canyon Foliage.blend":
+        export_environment(("CanyonTree", "RiverShrub", "LavenderPatch"))
+    elif source == "Power Effects.blend":
+        export_environment(("HomingRocket",))
     else:
         raise ValueError(f"Open a Ridge Relay source file before exporting, got {source!r}.")

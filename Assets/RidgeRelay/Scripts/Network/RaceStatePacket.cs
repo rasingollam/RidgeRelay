@@ -7,7 +7,7 @@ namespace RidgeRelay
     internal sealed class RaceStatePacket
     {
         private const int MaxTraps = 32;
-        private const int RunnerBytes = 15 + sizeof(uint) + 16 * sizeof(float);
+        private const int RunnerBytes = 20 + sizeof(uint) + 16 * sizeof(float);
         private const int HeaderBytes = 3 * sizeof(int) + 2;
         private const int TrapBytes = 2 + 2 * sizeof(float);
         internal const int Capacity = HeaderBytes + RunnerBytes * RaceSimulation.Entrants + TrapBytes * MaxTraps;
@@ -92,11 +92,14 @@ namespace RidgeRelay
             private float lateral, height, finish, shield, boost, slow, recovery, immunity;
             private float slipstream, pulseWarning, itemCooldown, routeBoost;
             private byte incomingPower, powerOwner, powerLane, castPower, impactPower;
+            private byte furColor;
+            private byte powerResolution, lastPowerHits, lastResolvedPower, lastUsedPower;
             private float powerWarning, castTime, impactTime;
 
             internal RunnerPacket(RunnerState runner)
             {
                 lane = (byte)(runner.Lane + 1);
+                furColor = (byte)runner.FurColor;
                 held = (byte)runner.Held;
                 place = (byte)runner.Place;
                 lateral = runner.Lateral;
@@ -128,6 +131,10 @@ namespace RidgeRelay
                 powerWarning = runner.PowerWarning;
                 castTime = runner.CastTime;
                 impactTime = runner.ImpactTime;
+                powerResolution = (byte)runner.PowerResolution;
+                lastPowerHits = (byte)runner.LastPowerHits;
+                lastResolvedPower = (byte)runner.LastResolvedPower;
+                lastUsedPower = (byte)runner.LastUsedPower;
             }
 
             internal void Write(FastBufferWriter writer)
@@ -135,6 +142,7 @@ namespace RidgeRelay
                 writer.WriteValueSafe(lane);
                 writer.WriteValueSafe(held);
                 writer.WriteValueSafe(place);
+                writer.WriteValueSafe(furColor);
                 writer.WriteValueSafe(lateral);
                 writer.WriteValueSafe(Distance);
                 writer.WriteValueSafe(height);
@@ -164,6 +172,10 @@ namespace RidgeRelay
                 writer.WriteValueSafe(powerWarning);
                 writer.WriteValueSafe(castTime);
                 writer.WriteValueSafe(impactTime);
+                writer.WriteValueSafe(powerResolution);
+                writer.WriteValueSafe(lastPowerHits);
+                writer.WriteValueSafe(lastResolvedPower);
+                writer.WriteValueSafe(lastUsedPower);
             }
 
             internal bool TryRead(ref FastBufferReader reader)
@@ -171,6 +183,7 @@ namespace RidgeRelay
                 reader.ReadValue(out lane);
                 reader.ReadValue(out held);
                 reader.ReadValue(out place);
+                reader.ReadValue(out furColor);
                 reader.ReadValue(out lateral);
                 reader.ReadValue(out Distance);
                 reader.ReadValue(out height);
@@ -200,7 +213,12 @@ namespace RidgeRelay
                 reader.ReadValue(out powerWarning);
                 reader.ReadValue(out castTime);
                 reader.ReadValue(out impactTime);
-                return lane <= 2 && held <= (byte)Gadget.Shock &&
+                reader.ReadValue(out powerResolution);
+                reader.ReadValue(out lastPowerHits);
+                reader.ReadValue(out lastResolvedPower);
+                reader.ReadValue(out lastUsedPower);
+                return lane <= 2 && furColor < RaceSimulation.FurColorCount && held <= (byte)Gadget.Shock &&
+                    lastPowerHits < RaceSimulation.Entrants && lastResolvedPower <= (byte)Gadget.Shock && lastUsedPower <= (byte)Gadget.Shock &&
                     incomingPower <= (byte)Gadget.Shock && castPower <= (byte)Gadget.Shock &&
                     impactPower <= (byte)Gadget.Shock && powerLane <= 2 && powerOwner <= RaceSimulation.Entrants &&
                     InRange(powerWarning, 0, RaceSimulation.RocketWindup) &&
@@ -218,6 +236,11 @@ namespace RidgeRelay
             internal void Apply(RunnerState runner, RunnerPacket prior, float blend)
             {
                 runner.Lane = lane - 1;
+                runner.FurColor = furColor;
+                runner.PowerResolution = powerResolution;
+                runner.LastPowerHits = lastPowerHits;
+                runner.LastResolvedPower = (Gadget)lastResolvedPower;
+                runner.LastUsedPower = (Gadget)lastUsedPower;
                 runner.Held = (Gadget)held;
                 runner.Place = place;
                 runner.Lateral = Mathf.Lerp(prior.lateral, lateral, blend);

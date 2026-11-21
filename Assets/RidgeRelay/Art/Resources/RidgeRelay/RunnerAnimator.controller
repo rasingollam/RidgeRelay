@@ -26,6 +26,58 @@ AnimatorState:
   m_MirrorParameter: 
   m_CycleOffsetParameter: 
   m_TimeParameter: 
+--- !u!1102 &-8260349533959201624
+AnimatorState:
+  serializedVersion: 6
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: CastShock
+  m_Speed: 1
+  m_CycleOffset: 0
+  m_Transitions: []
+  m_StateMachineBehaviours: []
+  m_Position: {x: 50, y: 50, z: 0}
+  m_IKOnFeet: 0
+  m_WriteDefaultValues: 1
+  m_Mirror: 0
+  m_SpeedParameterActive: 1
+  m_MirrorParameterActive: 0
+  m_CycleOffsetParameterActive: 0
+  m_TimeParameterActive: 0
+  m_Motion: {fileID: 2878107498297615290, guid: ed668978dc0a46941b42800b3e60b827, type: 3}
+  m_Tag: 
+  m_SpeedParameter: PowerTempo
+  m_MirrorParameter: 
+  m_CycleOffsetParameter: 
+  m_TimeParameter: 
+--- !u!1102 &-4626144135429511372
+AnimatorState:
+  serializedVersion: 6
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: CastMagnet
+  m_Speed: 1
+  m_CycleOffset: 0
+  m_Transitions: []
+  m_StateMachineBehaviours: []
+  m_Position: {x: 50, y: 50, z: 0}
+  m_IKOnFeet: 0
+  m_WriteDefaultValues: 1
+  m_Mirror: 0
+  m_SpeedParameterActive: 1
+  m_MirrorParameterActive: 0
+  m_CycleOffsetParameterActive: 0
+  m_TimeParameterActive: 0
+  m_Motion: {fileID: 5322379420079217793, guid: ed668978dc0a46941b42800b3e60b827, type: 3}
+  m_Tag: 
+  m_SpeedParameter: PowerTempo
+  m_MirrorParameter: 
+  m_CycleOffsetParameter: 
+  m_TimeParameter: 
 --- !u!1107 &-3871378281420865629
 AnimatorStateMachine:
   serializedVersion: 7
@@ -89,7 +141,7 @@ AnimatorState:
   m_MirrorParameterActive: 0
   m_CycleOffsetParameterActive: 0
   m_TimeParameterActive: 0
-  m_Motion: {fileID: 110800004, guid: ed668978dc0a46941b42800b3e60b827, type: 3}
+  m_Motion: {fileID: 110800012, guid: ed668978dc0a46941b42800b3e60b827, type: 3}
   m_Tag: 
   m_SpeedParameter: 
   m_MirrorParameter: 
@@ -115,12 +167,120 @@ AnimatorState:
   m_MirrorParameterActive: 0
   m_CycleOffsetParameterActive: 0
   m_TimeParameterActive: 0
-  m_Motion: {fileID: 6726881479104007263, guid: ed668978dc0a46941b42800b3e60b827, type: 3}
+  m_Motion: {fileID: 2019172167141750138}
   m_Tag: 
   m_SpeedParameter: 
   m_MirrorParameter: 
   m_CycleOffsetParameter: 
   m_TimeParameter: 
+--- !u!1107 &-1231350388727001274
+AnimatorStateMachine:
+  serializedVersion: 7
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Upper Body Power
+  m_ChildStates:
+  - serializedVersion: 1
+    m_State: {fileID: -778933672812995718}
+    m_Position: {x: 200, y: 0, z: 0}
+  - serializedVersion: 1
+    m_State: {fileID: -4626144135429511372}
+    m_Position: {x: 235, y: 65, z: 0}
+  - serializedVersion: 1
+    m_State: {fileID: 3082480579526212598}
+    m_Position: {x: 270, y: 130, z: 0}
+  - serializedVersion: 1
+    m_State: {fileID: -8260349533959201624}
+    m_Position: {x: 305, y: 195, z: 0}
+  m_ChildStateMachines: []
+  m_AnyStateTransitions: []
+  m_EntryTransitions: []
+  m_StateMachineTransitions: {}
+  m_StateMachineBehaviours: []
+  m_AnyStatePosition: {x: 50, y: 20, z: 0}
+  m_EntryPosition: {x: 50, y: 120, z: 0}
+  m_ExitPosition: {x: 800, y: 120, z: 0}
+  m_ParentStateMachinePosition: {x: 800, y: 20, z: 0}
+  m_DefaultState: {fileID: -778933672812995718}
+--- !u!1102 &-778933672812995718
+AnimatorState:
+  serializedVersion: 6
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: PowerAction
+  m_Speed: 1
+  m_CycleOffset: 0
+  m_Transitions: []
+  m_StateMachineBehaviours: []
+  m_Position: {x: 50, y: 50, z: 0}
+  m_IKOnFeet: 0
+  m_WriteDefaultValues: 1
+  m_Mirror: 0
+  m_SpeedParameterActive: 1
+  m_MirrorParameterActive: 0
+  m_CycleOffsetParameterActive: 0
+  m_TimeParameterActive: 0
+  m_Motion: {fileID: 110800012, guid: ed668978dc0a46941b42800b3e60b827, type: 3}
+  m_Tag: 
+  m_SpeedParameter: PowerTempo
+  m_MirrorParameter: 
+  m_CycleOffsetParameter: 
+  m_TimeParameter: 
+--- !u!319 &-759753056587801807
+AvatarMask:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Power upper body
+  m_Mask: 01000000010000000100000001000000010000000100000001000000010000000100000001000000010000000100000001000000u
+  m_Elements:
+  - m_Path: 
+    m_Weight: 0
+  - m_Path: Courier
+    m_Weight: 0
+  - m_Path: Courier/root
+    m_Weight: 0
+  - m_Path: Courier/root/hips
+    m_Weight: 0
+  - m_Path: Courier/root/hips/spine
+    m_Weight: 1
+  - m_Path: Courier/root/hips/spine/head
+    m_Weight: 1
+  - m_Path: Courier/root/hips/spine/head/ear.L
+    m_Weight: 1
+  - m_Path: Courier/root/hips/spine/head/ear.R
+    m_Weight: 1
+  - m_Path: Courier/root/hips/spine/upperArm.L
+    m_Weight: 1
+  - m_Path: Courier/root/hips/spine/upperArm.L/forearm.L
+    m_Weight: 1
+  - m_Path: Courier/root/hips/spine/upperArm.R
+    m_Weight: 1
+  - m_Path: Courier/root/hips/spine/upperArm.R/forearm.R
+    m_Weight: 1
+  - m_Path: Courier/root/hips/tail
+    m_Weight: 0
+  - m_Path: Courier/root/hips/tail/tailTip
+    m_Weight: 0
+  - m_Path: Courier/root/hips/thigh.L
+    m_Weight: 0
+  - m_Path: Courier/root/hips/thigh.L/shin.L
+    m_Weight: 0
+  - m_Path: Courier/root/hips/thigh.L/shin.L/foot.L
+    m_Weight: 0
+  - m_Path: Courier/root/hips/thigh.R
+    m_Weight: 0
+  - m_Path: Courier/root/hips/thigh.R/shin.R
+    m_Weight: 0
+  - m_Path: Courier/root/hips/thigh.R/shin.R/foot.R
+    m_Weight: 0
+  - m_Path: Jerboa Skin
+    m_Weight: 0
 --- !u!91 &9100000
 AnimatorController:
   m_ObjectHideFlags: 0
@@ -129,7 +289,25 @@ AnimatorController:
   m_PrefabAsset: {fileID: 0}
   m_Name: RunnerAnimator
   serializedVersion: 6
-  m_AnimatorParameters: []
+  m_AnimatorParameters:
+  - m_Name: Speed
+    m_Type: 1
+    m_DefaultFloat: 0
+    m_DefaultInt: 0
+    m_DefaultBool: 0
+    m_Controller: {fileID: 9100000}
+  - m_Name: Grade
+    m_Type: 1
+    m_DefaultFloat: 0
+    m_DefaultInt: 0
+    m_DefaultBool: 0
+    m_Controller: {fileID: 9100000}
+  - m_Name: PowerTempo
+    m_Type: 1
+    m_DefaultFloat: 0
+    m_DefaultInt: 0
+    m_DefaultBool: 0
+    m_Controller: {fileID: 9100000}
   m_AnimatorLayers:
   - serializedVersion: 5
     m_Name: Base Layer
@@ -143,7 +321,66 @@ AnimatorController:
     m_IKPass: 0
     m_SyncedLayerAffectsTiming: 0
     m_Controller: {fileID: 9100000}
+  - serializedVersion: 5
+    m_Name: Upper Body Power
+    m_StateMachine: {fileID: -1231350388727001274}
+    m_Mask: {fileID: -759753056587801807}
+    m_Motions: []
+    m_Behaviours: []
+    m_BlendingMode: 0
+    m_SyncedLayerIndex: -1
+    m_DefaultWeight: 0
+    m_IKPass: 0
+    m_SyncedLayerAffectsTiming: 0
+    m_Controller: {fileID: 9100000}
   m_EvaluateTransitionsOnStart: 1
+--- !u!206 &2019172167141750138
+BlendTree:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Terrain Running
+  m_Childs:
+  - serializedVersion: 2
+    m_Motion: {fileID: 6726881479104007263, guid: ed668978dc0a46941b42800b3e60b827, type: 3}
+    m_Threshold: 0
+    m_Position: {x: 1, y: 0}
+    m_TimeScale: 1
+    m_CycleOffset: 0
+    m_DirectBlendParameter: 
+    m_Mirror: 0
+  - serializedVersion: 2
+    m_Motion: {fileID: 110800022, guid: ed668978dc0a46941b42800b3e60b827, type: 3}
+    m_Threshold: 0.33333334
+    m_Position: {x: 1.35, y: 0}
+    m_TimeScale: 1
+    m_CycleOffset: 0
+    m_DirectBlendParameter: 
+    m_Mirror: 0
+  - serializedVersion: 2
+    m_Motion: {fileID: 8891542428447785200, guid: ed668978dc0a46941b42800b3e60b827, type: 3}
+    m_Threshold: 0.6666667
+    m_Position: {x: 1, y: 0.35}
+    m_TimeScale: 1
+    m_CycleOffset: 0
+    m_DirectBlendParameter: 
+    m_Mirror: 0
+  - serializedVersion: 2
+    m_Motion: {fileID: 110800006, guid: ed668978dc0a46941b42800b3e60b827, type: 3}
+    m_Threshold: 1
+    m_Position: {x: 1, y: -0.35}
+    m_TimeScale: 1
+    m_CycleOffset: 0
+    m_DirectBlendParameter: 
+    m_Mirror: 0
+  m_BlendParameter: Speed
+  m_BlendParameterY: Grade
+  m_MinThreshold: 0
+  m_MaxThreshold: 1
+  m_UseAutomaticThresholds: 1
+  m_NormalizedBlendValues: 0
+  m_BlendType: 3
 --- !u!1102 &2824221977709583489
 AnimatorState:
   serializedVersion: 6
@@ -164,7 +401,7 @@ AnimatorState:
   m_MirrorParameterActive: 0
   m_CycleOffsetParameterActive: 0
   m_TimeParameterActive: 0
-  m_Motion: {fileID: 110800000, guid: ed668978dc0a46941b42800b3e60b827, type: 3}
+  m_Motion: {fileID: 110800008, guid: ed668978dc0a46941b42800b3e60b827, type: 3}
   m_Tag: 
   m_SpeedParameter: 
   m_MirrorParameter: 
@@ -193,6 +430,32 @@ AnimatorState:
   m_Motion: {fileID: 4463315926797430410, guid: ed668978dc0a46941b42800b3e60b827, type: 3}
   m_Tag: 
   m_SpeedParameter: 
+  m_MirrorParameter: 
+  m_CycleOffsetParameter: 
+  m_TimeParameter: 
+--- !u!1102 &3082480579526212598
+AnimatorState:
+  serializedVersion: 6
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: CastRocket
+  m_Speed: 1
+  m_CycleOffset: 0
+  m_Transitions: []
+  m_StateMachineBehaviours: []
+  m_Position: {x: 50, y: 50, z: 0}
+  m_IKOnFeet: 0
+  m_WriteDefaultValues: 1
+  m_Mirror: 0
+  m_SpeedParameterActive: 1
+  m_MirrorParameterActive: 0
+  m_CycleOffsetParameterActive: 0
+  m_TimeParameterActive: 0
+  m_Motion: {fileID: 110800002, guid: ed668978dc0a46941b42800b3e60b827, type: 3}
+  m_Tag: 
+  m_SpeedParameter: PowerTempo
   m_MirrorParameter: 
   m_CycleOffsetParameter: 
   m_TimeParameter: 
@@ -242,7 +505,7 @@ AnimatorState:
   m_MirrorParameterActive: 0
   m_CycleOffsetParameterActive: 0
   m_TimeParameterActive: 0
-  m_Motion: {fileID: 110800002, guid: ed668978dc0a46941b42800b3e60b827, type: 3}
+  m_Motion: {fileID: 110800010, guid: ed668978dc0a46941b42800b3e60b827, type: 3}
   m_Tag: 
   m_SpeedParameter: 
   m_MirrorParameter: 

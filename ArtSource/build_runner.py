@@ -1,6 +1,8 @@
 """Build Ridge Relay's editable runner source and Unity FBX export."""
 from math import acos, atan2, cos, hypot, pi, sin
 from pathlib import Path
+from random import Random
+from bisect import bisect_left
 import sys
 
 import bpy
@@ -18,13 +20,16 @@ def build_runner():
     reset_scene()
     rust = material("Courier Coral", (0.67, 0.12, 0.078))
     rust_dark = material("Ear Shadow", (0.39, 0.062, 0.047))
-    cream = material("Dune Cream", (0.91, 0.69, 0.43))
+    cream = material("Dune Cream", (0.96, 0.86, 0.67))
     teal = material("Courier Teal", (0.022, 0.28, 0.26))
     green = material("Vest Shade", (0.017, 0.16, 0.15))
-    gold = material("Marigold Canvas", (0.93, 0.43, 0.042))
+    gold = material("Marigold Canvas", (0.93, 0.56, 0.17))
     leather = material("Boot Rubber", (0.063, 0.042, 0.042))
-    light_metal = material("Buckles", (0.85, 0.87, 0.71))
+    light_metal = material("Buckles", (0.98, 0.96, 0.86))
     eye = material("Eyes and Nose", (0.018, 0.012, 0.012))
+    tongue = material("Tongue Rose", (0.70, 0.20, 0.22))
+    ear_rose = material("Inner Ear Rose", (0.92, 0.60, 0.53))
+    iris = material("Hazel Iris", (0.34, 0.13, 0.035))
 
     skeleton = {
         "root": ((0, 0, 0), (0, 0, 0.55), None),
@@ -64,6 +69,9 @@ def build_runner():
     def bind(part, bone):
         group = part.vertex_groups.new(name=bone)
         group.add([vertex.index for vertex in part.data.vertices], 1.0, "REPLACE")
+        if bone == "head" and part.name.startswith(("Eye", "Pupil", "Hazel Iris")) and not part.name.startswith("Eye Patch"):
+            blink = part.vertex_groups.new(name="Blink.L" if part.location.x > 0 else "Blink.R")
+            blink.add([vertex.index for vertex in part.data.vertices], 1.0, "REPLACE")
         parts.append(part)
         return part
 
@@ -84,56 +92,133 @@ def build_runner():
         return bind(part, bone)
 
     ellipsoid("Haunches", (0, 0.023, 0.584), (0.206, 0.153, 0.183), rust, "hips")
-    ellipsoid("Vest", (0, -0.003, 0.751), (0.210, 0.161, 0.199), teal, "spine")
-    ellipsoid("Vest Front", (0, -0.143, 0.746), (0.063, 0.032, 0.151), cream, "spine")
-    ellipsoid("Stand Collar", (0, -0.014, 0.892), (0.164, 0.133, 0.052), green, "spine")
+    ellipsoid("Chest Fur", (0, -0.003, 0.751), (0.210, 0.161, 0.199), rust, "spine")
+    ellipsoid("Cream Belly", (0, -0.143, 0.746), (0.125, 0.041, 0.155), cream, "spine")
+    ellipsoid("Neck Fur", (0, -0.014, 0.892), (0.164, 0.133, 0.052), rust, "spine")
     block("Courier Pack", (0, 0.194, 0.758), (0.294, 0.176, 0.322), gold, "spine", 0.038)
     block("Pack Flap", (0, 0.274, 0.829), (0.252, 0.028, 0.132), gold, "spine")
-    block("Pack Strap", (0, 0.297, 0.748), (0.033, 0.023, 0.133), leather, "spine")
-    block("Pack Buckle", (0, 0.311, 0.754), (0.062, 0.015, 0.052), light_metal, "spine", 0.006)
     for side in (-1, 1):
         ellipsoid("Backpack Harness", (side * 0.127, -0.131, 0.812), (0.026, 0.023, 0.108),
                   gold, "spine", (0, -0.28 * side, 0))
-        block("Vest Pocket", (side * 0.117, -0.143, 0.686), (0.108, 0.051, 0.085),
-              green, "spine")
+    block("Pack Pocket", (0, 0.300, 0.670), (0.220, 0.046, 0.105), gold, "spine", 0.02)
+    for side in (-1, 1):
+        block("Leather Pack Band", (side * 0.087, 0.311, 0.755), (0.021, 0.014, 0.220),
+              leather, "spine", 0.004)
+        block("Pack Buckle", (side * 0.087, 0.324, 0.786), (0.046, 0.014, 0.042),
+              light_metal, "spine", 0.006)
+        block("Buckle Opening", (side * 0.087, 0.333, 0.786), (0.022, 0.006, 0.021),
+              leather, "spine", 0.002)
+    for stitch in range(12):
+        block("Flap Stitch", ((stitch - 5.5) * 0.019, 0.293, 0.866),
+              (0.009, 0.006, 0.004), cream, "spine", 0)
 
     ellipsoid("Head", (0, -0.044, 1.04), (0.232, 0.206, 0.195), rust, "head")
     ellipsoid("Muzzle", (0, -0.194, 0.988), (0.151, 0.107, 0.081), cream, "head")
-    ellipsoid("Nose", (0, -0.286, 1.023), (0.045, 0.034, 0.026), eye, "head")
+    ellipsoid("Nose", (0, -0.286, 1.023), (0.033, 0.027, 0.021), eye, "head")
     for side, sign in (("L", 1), ("R", -1)):
         head, tail, _ = skeleton[f"ear.{side}"]
         midpoint = (Vector(head) + Vector(tail)) / 2
         angle = 0.27 * sign
         length = (Vector(head) - Vector(tail)).length
-        ellipsoid("Outer Ear", midpoint, (0.099, 0.047, length * 0.61), rust_dark,
+        ellipsoid("Outer Ear", midpoint, (0.120, 0.047, length * 0.65), rust_dark,
                   f"ear.{side}", (0, angle, 0))
         ellipsoid("Inner Ear", midpoint + Vector((0, -0.035, 0.012)),
-                  (0.073, 0.019, length * 0.48), cream, f"ear.{side}", (0, angle, 0))
+                  (0.095, 0.019, length * 0.52), ear_rose, f"ear.{side}", (0, angle, 0))
         ellipsoid("Cheek", (sign * 0.127, -0.172, 0.990), (0.074, 0.065, 0.055), cream, "head")
-        ellipsoid("Eye Patch", (sign * 0.126, -0.205, 1.074), (0.053, 0.027, 0.063),
-                  cream, "head", (0, 0, sign * 0.48))
-        ellipsoid("Eye", (sign * 0.132, -0.225, 1.077), (0.030, 0.021, 0.049), eye, "head",
+        ellipsoid("Eye", (sign * 0.132, -0.225, 1.077), (0.051, 0.030, 0.066), eye, "head",
                   (0, 0, sign * 0.50))
-        ellipsoid("Eye Glint", (sign * 0.126, -0.245, 1.098), (0.010, 0.006, 0.011), light_metal, "head")
-        ellipsoid("Runner Shoe", (sign * 0.141, -0.060, 0.089), (0.086, 0.156, 0.067),
-                  cream, f"foot.{side}")
-        block("Shoe Sole", (sign * 0.141, -0.061, 0.033), (0.163, 0.292, 0.055),
-              leather, f"foot.{side}", 0.024)
-        block("Shoe Band", (sign * 0.141, -0.081, 0.143), (0.136, 0.047, 0.018),
-              teal, f"foot.{side}", 0.008)
+        ellipsoid("Hazel Iris", (sign * 0.132, -0.249, 1.078), (0.033, 0.015, 0.049), iris,
+                  "head", (0, 0, sign * 0.5))
+        ellipsoid("Pupil", (sign * 0.132, -0.263, 1.078), (0.024, 0.008, 0.039), eye,
+                  "head", (0, 0, sign * 0.5))
+        ellipsoid("Eye Glint", (sign * 0.120, -0.276, 1.101), (0.011, 0.006, 0.012),
+                  light_metal, "head")
+        ellipsoid("Hind Paw", (sign * 0.141, -0.060, 0.089), (0.078, 0.156, 0.067),
+                  rust, f"foot.{side}")
+        for toe in (-1, 0, 1):
+            ellipsoid("Paw Toe", (sign * 0.141 + toe * 0.035, -0.180, 0.080),
+                      (0.022, 0.050, 0.027), cream, f"foot.{side}")
         for name, radius in (("thigh", 0.10), ("shin", 0.062),
                              ("upperArm", 0.060), ("forearm", 0.045)):
             bone = f"{name}.{side}"
             start, end, _ = skeleton[bone]
             limb(name, start, end, radius, rust, bone)
-        ellipsoid("Driving Glove", (0.264 * sign, -0.063, 0.54), (0.058, 0.062, 0.054),
-                  leather, f"forearm.{side}")
+        ellipsoid("Front Paw", (0.264 * sign, -0.063, 0.54), (0.058, 0.062, 0.054),
+                  rust, f"forearm.{side}")
+        for finger in (-1, 0, 1):
+            ellipsoid("Paw Finger", (0.264 * sign + finger * 0.024, -0.074, 0.505),
+                      (0.015, 0.023, 0.032), cream, f"forearm.{side}")
     limb("Tail Base", *skeleton["tail"][:2], 0.042, rust, "tail")
     limb("Tail Tip", *skeleton["tailTip"][:2], 0.033, rust, "tailTip")
-    limb("Tail Tuft", (0.01, 0.622, 0.50), (0.029, 0.816, 0.599), 0.066, cream, "tailTip")
+    limb("Tail Tuft", (0.01, 0.55, 0.49), (0.029, 0.90, 0.62), 0.11, cream, "tailTip")
+    # Facial details remain on the head bone so the expression follows every action.
+    ellipsoid("Smile", (0, -0.305, 0.953), (0.073, 0.014, 0.024), eye, "head")
+    ellipsoid("Tongue", (0, -0.319, 0.941), (0.029, 0.004, 0.009), tongue, "head")
+    for sign in (-1, 1):
+        block("Front Tooth", (sign * 0.012, -0.321, 0.966), (0.020, 0.009, 0.016),
+              light_metal, "head", 0.004)
+        limb("Whisker", (sign * 0.129, -0.255, 0.977),
+             (sign * 0.246, -0.28, 0.990), 0.003, cream, "head")
+        limb("Whisker", (sign * 0.133, -0.253, 0.966),
+             (sign * 0.236, -0.27, 0.949), 0.003, cream, "head")
 
-    fixture("Jerboa Skin", parts)
+    # Fuse the fur silhouette before skinning so shoulders, hips and joints have
+    # a continuous organic surface. Keep the gear and facial details crisp.
+    fur = [part for part in parts if part.data.materials[0] in (rust, rust_dark)]
+    details = [part for part in parts if part not in fur]
+    donor = fixture("Fur weight source", fur)
+    body = donor.copy()
+    body.data = donor.data.copy()
+    bpy.context.collection.objects.link(body)
+    bpy.ops.object.select_all(action="DESELECT")
+    body.select_set(True)
+    bpy.context.view_layer.objects.active = body
+    remesh = body.modifiers.new("Continuous Fur Surface", "REMESH")
+    remesh.mode = "VOXEL"
+    remesh.voxel_size = 0.009
+    remesh.use_smooth_shade = True
+    bpy.ops.object.modifier_apply(modifier=remesh.name)
+    smooth = body.modifiers.new("Organic Transitions", "SMOOTH")
+    smooth.factor = 0.8
+    smooth.iterations = 4
+    bpy.ops.object.modifier_apply(modifier=smooth.name)
+    decimate = body.modifiers.new("Mobile Surface Budget", "DECIMATE")
+    decimate.ratio = min(1, 15000 / len(body.data.polygons))
+    bpy.ops.object.modifier_apply(modifier=decimate.name)
+    transfer = body.modifiers.new("Rig Weight Transfer", "DATA_TRANSFER")
+    transfer.object = donor
+    transfer.use_vert_data = True
+    transfer.data_types_verts = {"VGROUP_WEIGHTS"}
+    transfer.vert_mapping = "POLYINTERP_NEAREST"
+    transfer.layers_vgroup_select_src = "ALL"
+    transfer.layers_vgroup_select_dst = "NAME"
+    bpy.ops.object.modifier_apply(modifier=transfer.name)
+    smooth_skin_weights(body)
+    for face in body.data.polygons:
+        face.use_smooth = True
+    bpy.data.objects.remove(donor, do_unlink=True)
+    fur_details = [make_fur_tufts(body, rust, 2800, 0.016)]
+    for part in details:
+        if part.name.startswith("Tail Tuft"):
+            fur_details.append(make_fur_tufts(part, cream, 700, 0.035))
+    fixture("Jerboa Skin", [body] + details + fur_details)
     skin = bpy.context.object
+    # These stable slots are shared by the runtime fur and backpack palette.
+    ordered = [rust, teal, cream, green, gold, leather, light_metal, eye, rust_dark,
+               tongue, ear_rose, iris]
+    face_materials = [skin.data.materials[face.material_index] for face in skin.data.polygons]
+    skin.data.materials.clear()
+    for surface in ordered:
+        skin.data.materials.append(surface)
+    for face, surface in zip(skin.data.polygons, face_materials):
+        face.material_index = ordered.index(surface)
+    skin.shape_key_add(name="Basis")
+    for side in ("L", "R"):
+        group = skin.vertex_groups.get("Blink." + side)
+        key = skin.shape_key_add(name="Blink." + side)
+        for vertex in skin.data.vertices:
+            if any(weight.group == group.index for weight in vertex.groups):
+                key.data[vertex.index].co.z = 1.078 + (vertex.co.z - 1.078) * 0.12
     skin.parent = rig
     modifier = skin.modifiers.new("Courier Skin", "ARMATURE")
     modifier.object = rig
@@ -144,37 +229,145 @@ def build_runner():
     export_fbx(DEST / "Jerboa.fbx", [rig, skin], animated=True)
 
 
+def smooth_skin_weights(body):
+    neighbors = [set() for vertex in body.data.vertices]
+    for edge in body.data.edges:
+        a,b = edge.vertices
+        neighbors[a].add(b)
+        neighbors[b].add(a)
+    weights = [{group.group:group.weight for group in vertex.groups} for vertex in body.data.vertices]
+    for iteration in range(4):
+        blended = []
+        for i,adjacent in enumerate(neighbors):
+            result = {group:weight*0.5 for group,weight in weights[i].items()}
+            for neighbor in adjacent:
+                for group,weight in weights[neighbor].items():
+                    result[group] = result.get(group,0) + weight*0.5/max(1,len(adjacent))
+            strongest = sorted(result.items(),key=lambda item:-item[1])[:4]
+            total = sum(weight for _,weight in strongest)
+            blended.append({group:weight/total for group,weight in strongest} if total else weights[i])
+        weights = blended
+    indices = list(range(len(body.data.vertices)))
+    for group in body.vertex_groups: group.remove(indices)
+    for i,blend in enumerate(weights):
+        for group,weight in blend.items():
+            if weight>0.001: body.vertex_groups[group].add([i],weight,"REPLACE")
+
+
+def make_fur_tufts(source, surface, count, length):
+    """Short weighted fiber tufts soften the silhouette without transparent shells."""
+    source.data.calc_loop_triangles()
+    triangles = list(source.data.loop_triangles)
+    areas, total = [], 0
+    for triangle in triangles:
+        total += triangle.area
+        areas.append(total)
+    random = Random(120 + count)
+    vertices, faces, weights, normals = [], [], [], []
+    transform = source.matrix_world
+    normal_transform = transform.to_3x3().inverted().transposed()
+    for i in range(count):
+        triangle = triangles[min(len(triangles)-1, bisect_left(areas, random.random()*total))]
+        a, b = random.random(), random.random()
+        if a+b>1: a,b=1-a,1-b
+        bary = (a,b,1-a-b)
+        points = [source.data.vertices[index] for index in triangle.vertices]
+        point = transform @ sum((v.co*w for v,w in zip(points,bary)), Vector())
+        normal = (normal_transform @ sum((v.normal*w for v,w in zip(points,bary)), Vector())).normalized()
+        tangent = normal.cross(Vector((0.31,0.81,0.17))).normalized()
+        tangent = (tangent*cos(i*2.4)+normal.cross(tangent)*sin(i*2.4)).normalized()
+        size = length*random.uniform(0.6,1.25)
+        width = size*0.075
+        lean = Vector((0,0,-size*0.25))
+        start = len(vertices)
+        vertices.extend([point-tangent*width, point+tangent*width,
+                         point+normal*size*0.58+lean-tangent*width*0.55,
+                         point+normal*size*0.58+lean+tangent*width*0.55,
+                         point+normal*size+lean*2])
+        normals.extend([tuple(normal)]*5)
+        faces.extend([(start,start+1,start+3,start+2),(start+2,start+3,start+4),
+                      (start+2,start+3,start+1,start),(start+4,start+3,start+2)])
+        blend = {}
+        for vertex, weight in zip(points,bary):
+            for group in vertex.groups:
+                name = source.vertex_groups[group.group].name
+                blend[name] = blend.get(name,0) + group.weight*weight
+        weights.append(blend)
+    data = bpy.data.meshes.new("Silhouette Fur")
+    data.from_pydata(vertices,[],faces)
+    data.materials.append(surface)
+    result = bpy.data.objects.new("Short Fur Tufts",data)
+    bpy.context.collection.objects.link(result)
+    groups = {name: result.vertex_groups.new(name=name)
+              for name in sorted(set(name for blend in weights for name in blend))}
+    for i,blend in enumerate(weights):
+        for name,weight in blend.items():
+            if weight>0.001: groups[name].add(list(range(i*5,i*5+5)),weight,"REPLACE")
+    for face in data.polygons: face.use_smooth=True
+    data.normals_split_custom_set_from_vertices(normals)
+    return result
+
+
 def build_palette_atlas(skin):
-    # Every face of this flat-color design samples the center of its color block.
-    # Export one draw call per runner while leaving separate materials in the .blend.
-    size, cell = 64, 16
+    # Material cells keep color customization cheap while UVs carry surface detail.
+    size, cell = 512, 128
     palette = list(skin.data.materials)
     image = bpy.data.images.new("JerboaPalette", width=size, height=size, alpha=False)
     pixels = [1.0] * (size * size * 4)
+    normals = [0.5,0.5,1,1] * (size * size)
     for index, surface in enumerate(palette):
         x0, y0 = index % 4 * cell, index // 4 * cell
         color = tuple(surface.diffuse_color)
         for y in range(y0, y0 + cell):
             for x in range(x0, x0 + cell):
                 start = (y * size + x) * 4
-                pixels[start:start + 4] = color
+                grain = 1.0
+                if surface.name not in ("Eyes and Nose", "Buckles"):
+                    strand = sin(x * 1.9 + sin(y * 0.19) * 1.4)
+                    weave = sin(y * 2.4) * sin(x * 2.7)
+                    grain += 0.025 * strand + 0.012 * weave
+                pixels[start:start + 4] = [min(1, channel * grain) for channel in color[:3]] + [1]
+                dx=dy=0
+                if index in (0,2,8):
+                    phase=x*1.9+sin(y*0.19)*1.4
+                    dx=0.16*1.9*cos(phase)
+                    dy=0.16*cos(phase)*cos(y*0.19)*0.266
+                elif index==4:
+                    dx=0.08*2.7*cos(x*2.7)*sin(y*2.4)
+                    dy=0.08*2.4*sin(x*2.7)*cos(y*2.4)
+                normal=Vector((-dx,-dy,1)).normalized()
+                normals[start:start+4]=[normal.x*0.5+0.5,normal.y*0.5+0.5,normal.z*0.5+0.5,1]
     image.pixels.foreach_set(pixels)
     image.update()
     image.filepath_raw = str(DEST / "JerboaPalette.png")
     image.file_format = "PNG"
     image.save()
+    detail=bpy.data.images.new("JerboaFurNormal",width=size,height=size,alpha=False)
+    detail.colorspace_settings.name="Non-Color"
+    detail.pixels.foreach_set(normals)
+    detail.filepath_raw=str(DEST/"JerboaFurNormal.png")
+    detail.file_format="PNG"
+    detail.save()
 
-    uv = skin.data.uv_layers.active or skin.data.uv_layers.new(name="Palette UV")
+    # FBX uses UV channel zero. Remeshing and joining can retain a second active
+    # UV set, so replace every source set with the single exported atlas channel.
+    while skin.data.uv_layers:
+        skin.data.uv_layers.remove(skin.data.uv_layers[0])
+    uv = skin.data.uv_layers.new(name="Palette UV")
     for face in skin.data.polygons:
         index = face.material_index
-        center = ((index % 4 + 0.5) / 4, (index // 4 + 0.5) / 4)
+        horizontal = abs(face.normal.z) > 0.7
         for loop in face.loop_indices:
-            uv.uv[loop].vector = center
+            point = skin.data.vertices[skin.data.loops[loop].vertex_index].co
+            across = point.x * 5 % 1
+            along = (point.y if horizontal else point.z) * 5 % 1
+            uv.uv[loop].vector = ((index % 4 + 0.08 + across * 0.84) / 4,
+                                   (index // 4 + 0.08 + along * 0.84) / 4)
 
     surface = material("Jerboa Palette", (1, 1, 1))
     texture = surface.node_tree.nodes.new("ShaderNodeTexImage")
     texture.image = image
-    texture.interpolation = "Closest"
+    texture.interpolation = "Linear"
     surface.node_tree.links.new(texture.outputs["Color"],
                                 surface.node_tree.nodes["Principled BSDF"].inputs["Base Color"])
     skin.data.materials.clear()
@@ -279,6 +472,31 @@ def motions(rig):
         return lift, rotations
 
     action("Run", [(frame + 1, *running_pose((frame % 18) / 18)) for frame in range(19)])
+    for name in ("Sprint", "Uphill", "Downhill"):
+        keys = []
+        for frame in range(19):
+            lift, rotations = running_pose((frame % 18) / 18)
+            spine = list(rotations["spine"])
+            head = list(rotations["head"])
+            if name == "Sprint":
+                spine[0] += 0.12
+                head[0] -= 0.08
+                rotations["ear.L"] = (-0.42, 0.05, 0.05)
+                rotations["ear.R"] = (-0.47, -0.05, -0.05)
+            elif name == "Uphill":
+                spine[0] += 0.15
+                head[0] -= 0.08
+                lift -= 0.025
+            else:
+                spine[0] -= 0.16
+                head[0] += 0.06
+                rotations["upperArm.L"] = (0.10, 0.40, -0.22)
+                rotations["upperArm.R"] = (0.10, -0.40, 0.22)
+                rotations["tail"] = (0.18, 0, 0.15)
+            rotations["spine"] = tuple(spine)
+            rotations["head"] = tuple(head)
+            keys.append((frame + 1, lift, rotations))
+        action(name, keys)
     launch = {"thigh.L": -0.74, "thigh.R": 0.56, "shin.L": 0.95, "shin.R": 0.2,
               "foot.R": -0.38, "upperArm.L": 0.66, "upperArm.R": -1.15, "forearm.R": -0.74,
               "spine": 0.25, "head": -0.28, "ear.L": -0.37, "ear.R": -0.30, "tail": 0.29}
@@ -317,6 +535,18 @@ def motions(rig):
                   "upperArm.L": (0.57, 0.23, -0.18), "tail": (0.11, 0, -0.33)})
     action("Gadget", [(1, *running_pose(0.11)), (6, lift, throw), (10, lift, throw),
                       (17, *running_pose(0.85))])
+    reach = {"spine": (0.20, 0, 0), "head": -0.15,
+             "upperArm.L": (-1.12, 0.30, -0.18), "upperArm.R": (-1.12, -0.30, 0.18),
+             "forearm.L": -0.25, "forearm.R": -0.25}
+    pull = {**reach, "spine": -0.08, "upperArm.L": (-0.72, 0.55, -0.18),
+            "upperArm.R": (-0.72, -0.55, 0.18), "forearm.L": -1.15, "forearm.R": -1.15}
+    action("CastMagnet", [(1, 0, {}), (5, 0, reach), (11, 0, pull), (17, 0, {})])
+    action("CastRocket", [(1, 0, {}), (5, 0, {**throw, "head": -0.20}),
+                          (10, 0, {**throw, "upperArm.R": -2.1, "forearm.R": -0.2}),
+                          (17, 0, {})])
+    burst = {**reach, "spine": -0.12, "upperArm.L": (-0.30, 0.35, -0.85),
+             "upperArm.R": (-0.30, -0.35, 0.85), "forearm.L": -0.2, "forearm.R": -0.2}
+    action("CastShock", [(1, 0, pull), (6, 0, pull), (10, 0, burst), (17, 0, {})])
     rig.animation_data.action = idle
     scene.frame_set(1)
 

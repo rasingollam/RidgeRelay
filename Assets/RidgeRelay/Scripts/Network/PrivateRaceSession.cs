@@ -13,12 +13,12 @@ namespace RidgeRelay
 {
     public sealed class PrivateRaceSession : MonoBehaviour
     {
-        private const string SessionType = "ridge-relay-race-v5";
-        private const string HelloMessage = "ridge-relay/v5/hello";
-        private const string SeatsMessage = "ridge-relay/v5/seats";
-        private const string InputMessage = "ridge-relay/v5/input";
-        private const string StateMessage = "ridge-relay/v5/state";
-        private const byte ProtocolVersion = 5;
+        private const string SessionType = "ridge-relay-race-v6";
+        private const string HelloMessage = "ridge-relay/v6/hello";
+        private const string SeatsMessage = "ridge-relay/v6/seats";
+        private const string InputMessage = "ridge-relay/v6/input";
+        private const string StateMessage = "ridge-relay/v6/state";
+        private const byte ProtocolVersion = 6;
         private const int SnapshotInterval = 3;
         private const int InputBytes = 2 * sizeof(int) + 1;
         private const int MaxQueuedInputs = 8;
@@ -52,6 +52,7 @@ namespace RidgeRelay
 
         public RaceSimulation DisplayRace { get; private set; }
         public int LocalSlot { get; private set; } = -1;
+        public int FurColor { get; set; }
         public string JoinCode => session?.Code ?? "";
         public int HumanCount { get; private set; }
         public bool IsHost => session != null && manager != null && manager.IsHost;
@@ -207,6 +208,8 @@ namespace RidgeRelay
             foreach (Peer peer in peers.Values) peer.Reset();
             for (int i = 0; i < bots.Length; ++i) bots[i] = new RaceBot(167 + i * 37);
             DisplayRace = new RaceSimulation(waitForAll: true);
+            DisplayRace.Runners[0].FurColor = Mathf.Clamp(FurColor, 0, RaceSimulation.FurColorCount - 1);
+            foreach (Peer peer in peers.Values) DisplayRace.Runners[peer.Slot].FurColor = peer.FurColor;
             BroadcastState(NetworkDelivery.ReliableSequenced);
             RaceStarted?.Invoke();
             return true;
@@ -296,17 +299,20 @@ namespace RidgeRelay
             float now = Time.realtimeSinceStartup;
             if (IsHost || manager == null || !manager.IsConnectedClient || messaging == null || now < nextHello) return;
             nextHello = now + 0.7f;
-            using var writer = new FastBufferWriter(1, Allocator.Temp);
+            using var writer = new FastBufferWriter(2, Allocator.Temp);
             writer.WriteValueSafe(ProtocolVersion);
+            writer.WriteValueSafe((byte)Mathf.Clamp(FurColor, 0, RaceSimulation.FurColorCount - 1));
             messaging.SendNamedMessage(HelloMessage, NetworkManager.ServerClientId, writer);
         }
 
         private void ReceiveHello(ulong sender, FastBufferReader reader)
         {
             if (!IsHost || sender == NetworkManager.ServerClientId || !manager.ConnectedClients.ContainsKey(sender) ||
-                !reader.TryBeginRead(1)) return;
+                !reader.TryBeginRead(2)) return;
             reader.ReadValue(out byte protocol);
-            if (protocol != ProtocolVersion || reader.Position != reader.Length) return;
+            reader.ReadValue(out byte furColor);
+            if (protocol != ProtocolVersion || furColor >= RaceSimulation.FurColorCount ||
+                reader.Position != reader.Length) return;
 
             if (!peers.ContainsKey(sender))
             {
@@ -325,6 +331,7 @@ namespace RidgeRelay
 
                 peers.Add(sender, new Peer(slot));
             }
+            peers[sender].FurColor = furColor;
 
             SyncSeats();
         }
@@ -541,6 +548,7 @@ namespace RidgeRelay
         private sealed class Peer
         {
             public readonly int Slot;
+            public int FurColor;
             public readonly Queue<(int sequence, RaceCommand command)> Queue =
                 new Queue<(int, RaceCommand)>(MaxQueuedInputs);
             public int LastApplied;

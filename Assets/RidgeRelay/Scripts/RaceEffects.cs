@@ -16,6 +16,7 @@ namespace RidgeRelay
         private Material warning, impact, dodge, shield, wind, draft, shortcut;
         private Material magnet, rocket, shock;
         private Mesh magnetField, shockField;
+        private Material glowLine, glowMote, smoke;
         private bool initialized;
 
         public void Present(RaceSimulation race, int localSlot, bool reducedMotion)
@@ -46,6 +47,7 @@ namespace RidgeRelay
                 PresentShield(view, state, pose, visible, reducedMotion, time);
                 PresentWind(view, state, visible, reducedMotion, time);
                 PresentPower(view, race, state, pose, visible, race.HasIncomingMagnet(i), reducedMotion);
+                PresentLinks(view, race, i, visible, reducedMotion, time);
                 PresentResult(view, race, state, visible, reducedMotion, time);
             }
 
@@ -60,6 +62,7 @@ namespace RidgeRelay
             bool shockCast = cast == Gadget.Shock && state.CastTime > 0;
             bool field = visible && (shockCast || magnetThreat || (cast == Gadget.Magnet && state.CastTime > 0));
             view.Field.enabled = field;
+            view.Range.enabled = field;
             if (field)
             {
                 float radius = shockCast ? RaceSimulation.ShockRadius : 1.8f;
@@ -69,11 +72,24 @@ namespace RidgeRelay
                 view.Field.transform.SetPositionAndRotation(pose.Offset(0, 0.16f),
                     Quaternion.LookRotation(pose.Forward, pose.Up));
                 view.Field.transform.localScale = new Vector3(radius, reducedMotion ? 0.25f : 0.7f + charge, radius);
+                if (shockCast) view.Field.transform.localScale = Vector3.one * 0.7f;
+                view.Range.startColor = view.Range.endColor = shockCast
+                    ? new Color(0.12f,0.7f,1,0.85f) : new Color(1,0.12f,0.75f,0.8f);
+                for(int point=0;point<view.Range.positionCount;point++)
+                {
+                    float angle=point*Mathf.PI*2/(view.Range.positionCount-1);
+                    TrackPose boundary=TrackView.Sample(state.Distance+Mathf.Cos(angle)*radius,
+                        state.Lateral+Mathf.Sin(angle)*radius/RaceSimulation.LaneWidth);
+                    view.Range.SetPosition(point,boundary.Offset(0,0.09f));
+                }
             }
 
             bool incomingRocket = visible && state.IncomingPower == Gadget.Rocket && state.PowerWarning > 0 &&
                 state.PowerOwner >= 0 && state.PowerOwner < race.Runners.Count;
-            view.Rocket.enabled = incomingRocket && !reducedMotion;
+            view.Rocket.enabled = incomingRocket && view.RocketModel == null;
+            if (view.RocketModel != null) view.RocketModel.SetActive(incomingRocket);
+            view.RocketTrail.emitting = incomingRocket && !reducedMotion;
+            view.RocketTrail.enabled = !reducedMotion;
             view.Target.enabled = incomingRocket;
             if (incomingRocket)
             {
@@ -82,12 +98,21 @@ namespace RidgeRelay
                 // The projectile follows the course even on long shots around bends.
                 TrackPose flight = TrackView.Sample(Mathf.Lerp(caster.Distance, state.Distance, progress),
                     Mathf.Lerp(caster.Lateral, state.Lateral, progress));
-                view.Rocket.transform.SetPositionAndRotation(flight.Offset(0, 1.4f + Mathf.Sin(progress * Mathf.PI) * 0.8f),
-                    Quaternion.LookRotation(flight.Forward, flight.Up));
                 TrackPose landing = TrackView.Sample(state.Distance + 0.8f, state.Lateral);
+                Vector3 rocketPosition = reducedMotion ? landing.Offset(0, 1.8f) :
+                    flight.Offset(0, 1.4f + Mathf.Sin(progress * Mathf.PI) * 0.8f);
+                view.Rocket.transform.SetPositionAndRotation(rocketPosition,
+                    Quaternion.LookRotation(flight.Forward, flight.Up));
+                if (!view.PreviousRocket)
+                {
+                    view.RocketTrail.Clear();
+                }
+                if (!reducedMotion && !view.Smoke.isPlaying) view.Smoke.Play();
                 view.Target.transform.SetPositionAndRotation(landing.Offset(0, 0.08f),
                     Quaternion.LookRotation(landing.Forward, landing.Up));
             }
+            if ((!incomingRocket || reducedMotion) && view.Smoke.isPlaying)
+                view.Smoke.Stop(false, ParticleSystemStopBehavior.StopEmitting);
 
             view.PowerBurst.enabled = visible && state.ImpactTime > 0;
             if (view.PowerBurst.enabled)
@@ -97,6 +122,45 @@ namespace RidgeRelay
                 view.PowerBurst.transform.SetPositionAndRotation(pose.Offset(0, 0.32f + state.Height),
                     Quaternion.LookRotation(pose.Forward, pose.Up));
                 view.PowerBurst.transform.localScale = Vector3.one * scale;
+            }
+            if (!reducedMotion && state.ImpactTime > 0 &&
+                (view.PreviousImpactTime <= 0 || state.ImpactTime > view.PreviousImpactTime + 0.05f ||
+                 state.ImpactPower != view.PreviousImpactPower))
+            {
+                view.Sparks.transform.position = pose.Offset(0, 0.8f + state.Height);
+                var main = view.Sparks.main;
+                main.startColor = PowerMaterial(state.ImpactPower).color;
+                main.startSpeed = state.ImpactPower == Gadget.Rocket ? 3.5f : 2;
+                view.Sparks.Play();
+                view.Sparks.Emit(state.ImpactPower == Gadget.Rocket ? 32 : 18);
+            }
+        }
+
+        private static void PresentLinks(RunnerEffects view, RaceSimulation race, int owner,
+            bool visible, bool reducedMotion, float time)
+        {
+            RunnerState caster = race.Runners[owner];
+            bool magnetCast = caster.CastPower == Gadget.Magnet && caster.CastTime > 0;
+            bool shockCast = caster.CastPower == Gadget.Shock && caster.CastTime > 0;
+            for (int target = 0; target < view.Links.Length; target++)
+            {
+                LineRenderer beam = view.Links[target];
+                RunnerState rival = race.Runners[target];
+                beam.enabled = visible && rival.Recovery <= 0 && rival.FinishTime < 0 && owner != target &&
+                    ((magnetCast && race.IsMagnetTarget(owner,target)) || (shockCast && race.IsWithinShock(owner, target)));
+                if (!beam.enabled) continue;
+                Color color = magnetCast ? new Color(1, 0.12f, 0.77f, 0.85f) : new Color(0.15f, 0.7f, 1, 0.9f);
+                beam.startColor = beam.endColor = color;
+                for (int point = 0; point < beam.positionCount; point++)
+                {
+                    float t = point / (float)(beam.positionCount - 1);
+                    TrackPose pose = TrackView.Sample(Mathf.Lerp(caster.Distance, rival.Distance, t),
+                        Mathf.Lerp(caster.Lateral, rival.Lateral, t));
+                    float motion = reducedMotion ? 0 : Mathf.Sin(t * (magnetCast ? 7.5f : 120) + time * (magnetCast ? 9 : 22));
+                    Vector3 position = pose.Offset(motion * 0.18f * Mathf.Sin(t * Mathf.PI),
+                        0.85f + Mathf.Sin(t * Mathf.PI) * (magnetCast ? 0.65f : 0.12f) + motion * 0.08f);
+                    beam.SetPosition(point, position);
+                }
             }
         }
 
@@ -134,11 +198,14 @@ namespace RidgeRelay
             bool visible, bool reducedMotion, float time)
         {
             view.Shield.enabled = visible && state.Shield > 0;
+            view.Bubble.enabled = view.Shield.enabled;
             if (!view.Shield.enabled) return;
             Transform shell = view.Shield.transform;
             Quaternion rotation = Quaternion.LookRotation(pose.Forward, pose.Up);
             if (!reducedMotion) rotation *= Quaternion.AngleAxis(time * 34, Vector3.up);
-            shell.SetPositionAndRotation(pose.Offset(0, 0.86f + state.Height), rotation);
+            shell.SetPositionAndRotation(pose.Offset(0, 0.04f + state.Height), rotation);
+            view.Bubble.transform.SetPositionAndRotation(pose.Offset(0, 0.04f + state.Height),
+                Quaternion.LookRotation(pose.Forward, pose.Up));
         }
 
         private void PresentWind(RunnerEffects view, RunnerState state, bool visible, bool reducedMotion, float time)
@@ -195,16 +262,25 @@ namespace RidgeRelay
             warning = CreateMaterial(shader, "Pulse warning", new Color(1, 0.26f, 0.13f), 0.65f);
             impact = CreateMaterial(shader, "Pulse hit", new Color(1, 0.38f, 0.18f), 0.70f);
             dodge = CreateMaterial(shader, "Pulse dodged", new Color(0.25f, 0.88f, 0.77f), 0.48f);
-            shield = CreateMaterial(shader, "Shell Film", new Color(0.68f, 0.50f, 1), 0.50f);
+            shield = CreateMaterial(shader, "Shell Film", new Color(0.2f, 0.9f, 0.7f), 0.80f);
             wind = CreateMaterial(shader, "Tailwind", new Color(0.26f, 0.92f, 1), 0.6f);
             draft = CreateMaterial(shader, "Slipstream", new Color(0.80f, 0.94f, 0.88f), 0.32f);
             shortcut = CreateMaterial(shader, "Route boost", new Color(1, 0.76f, 0.30f), 0.58f);
             magnet = CreateMaterial(shader, "Magnet field", new Color(0.97f, 0.25f, 0.94f), 1.0f);
             rocket = CreateMaterial(shader, "Rocket ember", new Color(1, 0.36f, 0.05f), 1.1f);
             shock = CreateMaterial(shader, "Shock arc", new Color(0.2f, 0.8f, 1), 1.25f);
+            glowLine = new Material(Shader.Find("RidgeRelay/Power Glow")) { name = "Power ribbons" };
+            glowMote = new Material(Shader.Find("RidgeRelay/Power Mote")) { name = "Power sparks" };
+            smoke = new Material(Shader.Find("RidgeRelay/Soft Smoke")) { name = "Soft rocket smoke" };
+            materials.Add(glowLine);
+            materials.Add(glowMote);
+            materials.Add(smoke);
 
             Mesh warningMesh = CreateWarningMesh();
-            Mesh shieldMesh = CreateRingMesh("Shield cage", 0.72f, 0.045f, true);
+            Mesh shieldMesh = CreateRingMesh("Shield rim", 1, 0.035f, false);
+            Mesh bubbleMesh = CreateShieldBubble();
+            var bubbleMaterial = new Material(Shader.Find("RidgeRelay/Shield Bubble")) { name = "Mint shield bubble" };
+            materials.Add(bubbleMaterial);
             Mesh resultMesh = CreateRingMesh("Pulse result", 0.58f, 0.10f, false);
             Mesh trailMesh = CreateWindMesh();
             var fieldShape = new EffectMesh();
@@ -224,11 +300,13 @@ namespace RidgeRelay
             }
             shockField = FinishMesh("Shock boundary and lightning spokes", fieldShape);
             Mesh rocketMesh = CreateRocketMesh();
+            GameObject rocketModel = Resources.Load<GameObject>("RidgeRelay/Environment/HomingRocket");
             for (int i = 0; i < runners.Length; i++)
             {
                 var view = new RunnerEffects
                 {
                     Shield = CreateRenderer("Shield outline", shieldMesh, shield),
+                    Bubble = CreateRenderer("Protective shell", bubbleMesh, bubbleMaterial),
                     Result = CreateRenderer("Pulse result", resultMesh, impact),
                     Field = CreateRenderer("Power boundary", magnetField, magnet),
                     Rocket = CreateRenderer("Rocket projectile", rocketMesh, rocket),
@@ -236,6 +314,53 @@ namespace RidgeRelay
                     PowerBurst = CreateRenderer("Power impact", resultMesh, shock)
                 };
                 view.FieldMesh = view.Field.GetComponent<MeshFilter>();
+                if (rocketModel != null)
+                {
+                    view.RocketModel = Instantiate(rocketModel, view.Rocket.transform, false);
+                    view.RocketModel.transform.localRotation = Quaternion.Euler(0, 180, 0);
+                    foreach (Renderer renderer in view.RocketModel.GetComponentsInChildren<Renderer>())
+                    {
+                        renderer.shadowCastingMode = ShadowCastingMode.Off;
+                        renderer.receiveShadows = false;
+                    }
+                    view.RocketModel.SetActive(false);
+                }
+                for (int target = 0; target < view.Links.Length; target++)
+                {
+                    var link = new GameObject("Power link").AddComponent<LineRenderer>();
+                    link.transform.SetParent(transform, false);
+                    link.sharedMaterial = glowLine;
+                    link.positionCount = 36;
+                    link.startWidth = 0.17f;
+                    link.endWidth = 0.09f;
+                    link.numCapVertices = 3;
+                    link.shadowCastingMode = ShadowCastingMode.Off;
+                    link.receiveShadows = false;
+                    link.enabled = false;
+                    view.Links[target] = link;
+                }
+                view.Range = new GameObject("Power range ring").AddComponent<LineRenderer>();
+                view.Range.transform.SetParent(transform,false);
+                view.Range.sharedMaterial=glowLine;
+                view.Range.positionCount=65;
+                view.Range.startWidth=view.Range.endWidth=0.12f;
+                view.Range.shadowCastingMode=ShadowCastingMode.Off;
+                view.Range.receiveShadows=false;
+                view.Range.enabled=false;
+                var trailObject = new GameObject("Rocket smoke trail");
+                trailObject.transform.SetParent(view.Rocket.transform, false);
+                trailObject.transform.localPosition = new Vector3(0, 0, -0.3f);
+                view.RocketTrail = trailObject.AddComponent<TrailRenderer>();
+                view.RocketTrail.sharedMaterial = glowLine;
+                view.RocketTrail.time = 0.35f;
+                view.RocketTrail.startWidth = 0.22f;
+                view.RocketTrail.endWidth = 0;
+                view.RocketTrail.startColor = new Color(1, 0.6f, 0.2f, 0.8f);
+                view.RocketTrail.endColor = new Color(1, 0.3f, 0.06f, 0);
+                view.RocketTrail.shadowCastingMode = ShadowCastingMode.Off;
+                view.RocketTrail.emitting = false;
+                view.Sparks = CreateSparks();
+                view.Smoke = CreateSmoke(view.Rocket.transform);
                 for (int stripe = 0; stripe < view.Warning.Length; stripe++)
                     view.Warning[stripe] = CreateRenderer("Warning stripe", warningMesh, warning);
                 for (int strand = 0; strand < view.Wind.Length; strand++)
@@ -266,6 +391,41 @@ namespace RidgeRelay
             return FinishMesh("Rocket with exhaust", shape);
         }
 
+        private Mesh CreateShieldBubble()
+        {
+            const int sides = 24;
+            const int levels = 8;
+            var vertices = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var indices = new List<int>();
+            for (int level = 0; level <= levels; level++)
+            {
+                float angle = level * Mathf.PI * 0.5f / levels;
+                for (int side = 0; side <= sides; side++)
+                {
+                    float around = side * Mathf.PI * 2 / sides;
+                    vertices.Add(new Vector3(Mathf.Cos(around) * Mathf.Cos(angle),
+                        Mathf.Sin(angle) * 1.8f, Mathf.Sin(around) * Mathf.Cos(angle)));
+                    uvs.Add(new Vector2(side / (float)sides, level / (float)levels));
+                }
+            }
+            for (int level = 0; level < levels; level++)
+                for (int side = 0; side < sides; side++)
+                {
+                    int a = level * (sides + 1) + side;
+                    int b = a + sides + 1;
+                    indices.AddRange(new[] { a, b, b + 1, a, b + 1, a + 1 });
+                }
+            var mesh = new Mesh { name = "Shield hemisphere" };
+            mesh.SetVertices(vertices);
+            mesh.SetUVs(0, uvs);
+            mesh.SetTriangles(indices, 0);
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            meshes.Add(mesh);
+            return mesh;
+        }
+
         private Material CreateMaterial(Shader shader, string label, Color color, float emission)
         {
             var material = new Material(shader) { name = label, color = color };
@@ -289,6 +449,82 @@ namespace RidgeRelay
             renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
             renderer.enabled = false;
             return renderer;
+        }
+
+        private ParticleSystem CreateSparks()
+        {
+            var system = new GameObject("Power impact sparks").AddComponent<ParticleSystem>();
+            system.transform.SetParent(transform, false);
+            system.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            var main = system.main;
+            main.loop = false;
+            main.playOnAwake = false;
+            main.duration = 0.6f;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.3f, 0.65f);
+            main.startSpeed = 2;
+            main.startSize = new ParticleSystem.MinMaxCurve(0.05f, 0.14f);
+            main.gravityModifier = 0.35f;
+            main.maxParticles = 96;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            var emission = system.emission;
+            emission.enabled = false;
+            var shape = system.shape;
+            shape.shapeType = ParticleSystemShapeType.Sphere;
+            shape.radius = 0.25f;
+            var size = system.sizeOverLifetime;
+            size.enabled = true;
+            size.size = new ParticleSystem.MinMaxCurve(1, AnimationCurve.Linear(0, 1, 1, 0));
+            var fade = system.colorOverLifetime;
+            fade.enabled = true;
+            var gradient = new Gradient();
+            gradient.SetKeys(new[] { new GradientColorKey(Color.white, 0), new GradientColorKey(Color.white, 1) },
+                new[] { new GradientAlphaKey(1, 0), new GradientAlphaKey(0, 1) });
+            fade.color = new ParticleSystem.MinMaxGradient(gradient);
+            ParticleSystemRenderer renderer = system.GetComponent<ParticleSystemRenderer>();
+            renderer.sharedMaterial = glowMote;
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            return system;
+        }
+
+        public void SetPaused(bool paused)
+        {
+            if (!initialized) return;
+            foreach (RunnerEffects view in runners)
+            {
+                if (paused && view.Sparks.isPlaying) view.Sparks.Pause();
+                else if (!paused && view.Sparks.isPaused) view.Sparks.Play();
+                if (paused && view.Smoke.isPlaying) view.Smoke.Pause();
+                else if (!paused && view.Smoke.isPaused) view.Smoke.Play();
+            }
+        }
+
+        private ParticleSystem CreateSmoke(Transform rocket)
+        {
+            ParticleSystem system = CreateSparks();
+            system.name = "Rocket smoke";
+            system.transform.SetParent(rocket, false);
+            var main = system.main;
+            main.loop = true;
+            main.duration = 1;
+            main.startColor = new Color(0.92f, 0.89f, 0.81f, 0.7f);
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.4f, 0.7f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.12f, 0.25f);
+            main.startSpeed = 0.2f;
+            main.gravityModifier = 0;
+            var shape = system.shape;
+            shape.shapeType = ParticleSystemShapeType.Cone;
+            shape.angle = 8;
+            shape.radius = 0.04f;
+            shape.position = new Vector3(0, 0, -0.35f);
+            shape.rotation = new Vector3(0, 180, 0);
+            var emission = system.emission;
+            emission.enabled = true;
+            emission.rateOverTime = 28;
+            var size = system.sizeOverLifetime;
+            size.size = new ParticleSystem.MinMaxCurve(1, AnimationCurve.Linear(0, 0.35f, 1, 1.5f));
+            system.GetComponent<ParticleSystemRenderer>().sharedMaterial = smoke;
+            return system;
         }
 
         private Mesh CreateWarningMesh()
@@ -372,8 +608,15 @@ namespace RidgeRelay
             foreach (RunnerEffects view in runners)
             {
                 if (view == null) continue;
-                view.Shield.enabled = view.Result.enabled = false;
+                view.Shield.enabled = view.Bubble.enabled = view.Result.enabled = false;
                 view.Field.enabled = view.Rocket.enabled = view.Target.enabled = view.PowerBurst.enabled = false;
+                view.Range.enabled=false;
+                view.RocketTrail.emitting = false;
+                view.RocketTrail.Clear();
+                if (view.RocketModel != null) view.RocketModel.SetActive(false);
+                view.Sparks.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                view.Smoke.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                foreach (LineRenderer link in view.Links) link.enabled = false;
                 view.ResultStart = float.NegativeInfinity;
                 foreach (MeshRenderer stripe in view.Warning) stripe.enabled = false;
                 foreach (MeshRenderer strand in view.Wind) strand.enabled = false;
@@ -390,9 +633,18 @@ namespace RidgeRelay
         {
             public readonly MeshRenderer[] Warning = new MeshRenderer[WarningTiles];
             public readonly MeshRenderer[] Wind = new MeshRenderer[WindStrands];
-            public MeshRenderer Shield, Result;
+            public MeshRenderer Shield, Bubble, Result;
             public MeshRenderer Field, Rocket, Target, PowerBurst;
             public MeshFilter FieldMesh;
+            public readonly LineRenderer[] Links = new LineRenderer[RaceSimulation.Entrants];
+            public LineRenderer Range;
+            public TrailRenderer RocketTrail;
+            public ParticleSystem Sparks;
+            public ParticleSystem Smoke;
+            public GameObject RocketModel;
+            public bool PreviousRocket;
+            public float PreviousImpactTime;
+            public Gadget PreviousImpactPower;
             public int PreviousOwner, PreviousLane;
             public int PreviousHits, PreviousDodges, PreviousBlocks;
             public int ResultLane;
@@ -413,6 +665,9 @@ namespace RidgeRelay
                 PreviousHits = state.PulseHits;
                 PreviousDodges = state.PulseDodges;
                 PreviousBlocks = state.PulseBlocks;
+                PreviousImpactTime = state.ImpactTime;
+                PreviousImpactPower = state.ImpactPower;
+                PreviousRocket = state.IncomingPower == Gadget.Rocket && state.PowerWarning > 0;
             }
         }
 

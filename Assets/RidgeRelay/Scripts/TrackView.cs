@@ -135,6 +135,7 @@ namespace RidgeRelay
             BuildFinishTerrace();
             BuildTunnel();
             BuildEnvironment();
+            BuildWaterfalls();
             BuildCourseLandmarks();
             BuildFeatures();
         }
@@ -150,7 +151,9 @@ namespace RidgeRelay
             metal = MaterialFor("Deep teal fittings", 0x194c57);
             hazard = MaterialFor("Coral hazard", 0xe26142);
             water = MaterialFor("Turquoise water", 0x318b94);
-            ripple = MaterialFor("Quiet shallows", 0x4ba8a8);
+            Shader riverShader = Shader.Find("RidgeRelay/River Water");
+            if (riverShader != null) water.shader = riverShader;
+            ripple = MaterialFor("Quiet shallows", 0xa6e2d3);
             redCliff = MaterialFor("Iron sandstone", 0xa25e59);
             mauveCliff = MaterialFor("Lavender rock", 0x895f77);
             sandCliff = MaterialFor("Pale cliff", 0xd99972);
@@ -207,6 +210,23 @@ namespace RidgeRelay
                 }
             }
             Emit("Cedar bridge lanterns", bridge);
+            var bridgeRails = new Batch();
+            for (float s = 118; s < 236; s += 2)
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    TrackPose pose = Sample(s + 1, side * 1.57f);
+                    AddBox(bridgeRails, timber, pose, 0, 0.88f, 0, 0.14f, 0.14f, 2.05f);
+                    AddBox(bridgeRails, timber, pose, 0, 0.46f, 0, 0.10f, 0.10f, 2.05f);
+                    if ((int)s % 4 == 2)
+                    {
+                        AddBox(bridgeRails, timber, pose, 0, 0.5f, -1, 0.19f, 1.0f, 0.19f);
+                        AddBeam(bridgeRails, timber, pose.Offset(0,0.17f,-1), pose.Offset(0,0.79f,3), 0.10f);
+                        AddPennant(bridgeRails, pose, side);
+                        AddBolt(bridgeRails, pose, side, 0.72f, -1);
+                        AddBolt(bridgeRails, pose, side, 0.38f, -1);
+                    }
+                }
+            Emit("Cedar bridge handrails", bridgeRails);
 
             var river = new Batch();
             for (float s = 112; s < 175; s += 5)
@@ -239,6 +259,47 @@ namespace RidgeRelay
             Emit("High ridge beacons", ridge);
         }
 
+        private void AddPennant(Batch batch, TrackPose pose, int side)
+        {
+            Vector3 a=pose.Offset(-side*0.09f,0.82f,-0.43f);
+            Vector3 b=pose.Offset(-side*0.09f,0.82f,0.43f);
+            Vector3 tip=pose.Offset(-side*0.14f,0.22f,0);
+            batch.Triangle(teal,a,b,tip);
+            batch.Triangle(teal,tip,b,a);
+            float face=-side*0.15f;
+            Vector3 body=pose.Offset(face,0.57f,0);
+            Vector3 tail=pose.Offset(face,0.61f,-0.18f);
+            Vector3 chest=pose.Offset(face,0.65f,0.13f);
+            batch.Triangle(bright,body,tail,chest);
+            batch.Triangle(bright,chest,tail,body);
+            Vector3 ear=pose.Offset(face,0.76f,0.06f);
+            batch.Triangle(bright,chest,ear,pose.Offset(face,0.64f,0.02f));
+            batch.Triangle(bright,pose.Offset(face,0.64f,0.02f),ear,chest);
+            AddBeam(batch,fabric,a,b,0.018f);
+        }
+
+        private void AddBolt(Batch batch, TrackPose pose, int side, float height, float along)
+        {
+            Vector3 center=pose.Offset(-side*0.102f,height,along);
+            for(int i=0;i<10;i++)
+            {
+                float a=i*Mathf.PI*0.2f,b=(i+1)*Mathf.PI*0.2f;
+                Vector3 p=center+pose.Up*(Mathf.Cos(a)*0.04f)+pose.Forward*(Mathf.Sin(a)*0.04f);
+                Vector3 q=center+pose.Up*(Mathf.Cos(b)*0.04f)+pose.Forward*(Mathf.Sin(b)*0.04f);
+                batch.Triangle(metal,center,p,q);
+                batch.Triangle(metal,center,q,p);
+            }
+        }
+
+        private static void AddBeam(Batch batch, Material material, Vector3 from, Vector3 to, float width)
+        {
+            Vector3 forward=(to-from).normalized;
+            Vector3 right=Vector3.Cross(Vector3.up,forward).normalized;
+            Vector3 up=Vector3.Cross(forward,right).normalized;
+            AddBox(batch,material,new TrackPose((from+to)*0.5f,forward,up,right),
+                0,0,0,width,width,Vector3.Distance(from,to));
+        }
+
         private Material MaterialFor(string materialName, int packedColor, bool emission = false)
         {
             Shader shader = GraphicsSettings.currentRenderPipeline != null
@@ -247,6 +308,38 @@ namespace RidgeRelay
             var color = new Color32((byte)(packedColor >> 16), (byte)(packedColor >> 8), (byte)packedColor, 255);
             var material = new Material(shader) { name = materialName, color = color };
             material.SetFloat("_Smoothness", 0.08f);
+            string surface = materialName switch
+            {
+                "Chalk sandstone" or "Warm paving" or "Sandstone coping" => "Sandstone",
+                "River bridge cedar" or "Ochre wood" => "Timber",
+                "High ridge slate" => "Slate",
+                "Lavender rock" => "CanyonRockV2",
+                "Iron sandstone" or "Pale cliff" or "Tunnel interior sandstone" => "CanyonRockV2",
+                _ => null
+            };
+            if (surface != null)
+            {
+                Texture2D texture = Resources.Load<Texture2D>("RidgeRelay/Surfaces/" + surface);
+                material.mainTexture = texture;
+                Texture2D normal = Resources.Load<Texture2D>("RidgeRelay/Surfaces/" + surface + "Normal");
+                Texture2D mask = Resources.Load<Texture2D>("RidgeRelay/Surfaces/" + surface + "Mask");
+                if (normal != null)
+                {
+                    material.SetTexture("_BumpMap", normal);
+                    material.SetFloat("_BumpScale", 0.4f);
+                    material.EnableKeyword("_NORMALMAP");
+                }
+                if (mask != null)
+                {
+                    material.SetTexture("_MetallicGlossMap", mask);
+                    material.SetFloat("_Smoothness", 1);
+                    material.EnableKeyword("_METALLICSPECGLOSSMAP");
+                }
+                if (texture != null)
+                    material.color = materialName == "Lavender rock" ? new Color(0.67f, 0.76f, 0.91f)
+                        : surface == "CanyonRockV2" ? Color.white
+                        : surface == "Timber" ? new Color(0.70f, 0.73f, 0.76f) : Color.white;
+            }
             if (emission)
             {
                 material.EnableKeyword("_EMISSION");
@@ -362,15 +455,17 @@ namespace RidgeRelay
                 if (lane == 0) continue;
                 float edge = lane * DeckHalfWidth;
                 float inner = edge - lane * 0.24f;
-                Strip(batch, rail, a, b, Mathf.Min(inner, edge), Mathf.Max(inner, edge), 0.155f);
-                Strip(batch, teal, a, b, Mathf.Min(inner, edge), Mathf.Max(inner, edge), 0.166f);
-                AddDeckWall(batch, rail, a, b, inner, lane > 0, 0, 0.155f);
-                AddDeckWall(batch, rail, a, b, edge, lane < 0, 0, 0.155f);
+                float coping = paving == boardwalk ? 0.155f : 0.60f;
+                Strip(batch, rail, a, b, Mathf.Min(inner, edge), Mathf.Max(inner, edge), coping);
+                Strip(batch, teal, a, b, Mathf.Min(inner, edge), Mathf.Max(inner, edge), coping + 0.011f);
+                AddDeckWall(batch, rail, a, b, inner, lane > 0, 0, coping);
+                AddDeckWall(batch, rail, a, b, edge, lane < 0, 0, coping);
                 if (Mathf.FloorToInt(a + 14) % 6 == 0)
                 {
                     TrackPose p = Sample(a + 0.08f, (edge - lane * 0.12f) / RaceSimulation.LaneWidth);
-                    AddBox(batch, rail, p, 0, 0.20f, 0, 0.3f, 0.4f, 0.3f);
-                    AddBox(batch, bright, p, 0, 0.42f, 0, 0.34f, 0.07f, 0.34f);
+                    float post = paving == boardwalk ? 0.4f : 0.85f;
+                    AddBox(batch, rail, p, 0, post * 0.5f, 0, 0.3f, post, 0.3f);
+                    AddBox(batch, bright, p, 0, post + 0.02f, 0, 0.34f, 0.07f, 0.34f);
                 }
             }
         }
@@ -386,8 +481,18 @@ namespace RidgeRelay
         private static void Strip(Batch batch, Material material, float from, float to, float left, float right, float y)
         {
             if (to <= from) return;
+            if(material.name=="River bridge cedar")
+            {
+                batch.Quad(material,TrackPoint(from,left,y),TrackPoint(to,left,y),
+                    TrackPoint(to,right,y),TrackPoint(from,right,y),
+                    new Vector2(from*0.4f,left*0.23f),new Vector2(to*0.4f,left*0.23f),
+                    new Vector2(to*0.4f,right*0.23f),new Vector2(from*0.4f,right*0.23f));
+                return;
+            }
             batch.Quad(material, TrackPoint(from, left, y), TrackPoint(to, left, y),
-                TrackPoint(to, right, y), TrackPoint(from, right, y));
+                TrackPoint(to, right, y), TrackPoint(from, right, y),
+                new Vector2(left * 0.5f, from * 0.25f), new Vector2(left * 0.5f, to * 0.25f),
+                new Vector2(right * 0.5f, to * 0.25f), new Vector2(right * 0.5f, from * 0.25f));
         }
 
         private static void AddDeckWall(Batch batch, Material material, float from, float to, float side,
@@ -461,16 +566,25 @@ namespace RidgeRelay
             for (float from = start; from < end; from += 2)
             {
                 float to = Mathf.Min(from + 2, end);
-                Strip(tunnel, redCliff, from, to, left - 0.24f, right + 0.24f, TunnelClearance + 0.32f);
-                tunnel.Quad(tunnelStone, TrackPoint(from, right, TunnelClearance),
-                    TrackPoint(to, right, TunnelClearance), TrackPoint(to, left, TunnelClearance),
-                    TrackPoint(from, left, TunnelClearance));
-                AddDeckWall(tunnel, tunnelStone, from, to, left, false, 0, TunnelClearance);
-                AddDeckWall(tunnel, tunnelStone, from, to, right, true, 0, TunnelClearance);
-                AddDeckWall(tunnel, sandCliff, from, to, left - 0.24f, true, 0, TunnelClearance + 0.32f);
-                AddDeckWall(tunnel, sandCliff, from, to, right + 0.24f, false, 0, TunnelClearance + 0.32f);
-                AddDeckWall(tunnel, stone, from, to, dividerLeft, true, 0, TunnelClearance);
-                AddDeckWall(tunnel, sandstone, from, to, dividerRight, false, 0, TunnelClearance);
+                const float spring=3;
+                AddDeckWall(tunnel, tunnelStone, from, to, left, false, 0, spring);
+                AddDeckWall(tunnel, tunnelStone, from, to, right, true, 0, spring);
+                AddDeckWall(tunnel, sandCliff, from, to, left - 0.32f, true, 0, spring);
+                AddDeckWall(tunnel, sandCliff, from, to, right + 0.32f, false, 0, spring);
+                for(int arch=0;arch<16;arch++)
+                {
+                    float a=arch*Mathf.PI/16,b=(arch+1)*Mathf.PI/16;
+                    float x0=right*Mathf.Cos(a),x1=right*Mathf.Cos(b);
+                    float y0=spring+(TunnelClearance-spring)*Mathf.Sin(a);
+                    float y1=spring+(TunnelClearance-spring)*Mathf.Sin(b);
+                    tunnel.Quad(tunnelStone,TrackPoint(from,x0,y0),TrackPoint(to,x0,y0),
+                        TrackPoint(to,x1,y1),TrackPoint(from,x1,y1));
+                    tunnel.Quad(sandCliff,TrackPoint(from,x1*1.1f,y1+0.32f),TrackPoint(to,x1*1.1f,y1+0.32f),
+                        TrackPoint(to,x0*1.1f,y0+0.32f),TrackPoint(from,x0*1.1f,y0+0.32f));
+                }
+                AddDeckWall(tunnel, stone, from, to, dividerLeft, true, 0, 3);
+                AddDeckWall(tunnel, sandstone, from, to, dividerRight, false, 0, 3);
+                Strip(tunnel,rail,from,to,dividerLeft,dividerRight,3);
                 AddDeckWall(tunnel, guide, from, to, dividerLeft - 0.005f, true, 1.52f, 1.62f);
                 AddDeckWall(tunnel, gold, from, to, dividerRight + 0.005f, false, 1.52f, 1.62f);
             }
@@ -484,8 +598,8 @@ namespace RidgeRelay
                 for (int side = -1; side <= 1; side += 2)
                 {
                     TrackPose fixture = Sample(s, side * 1.28f);
-                    AddBox(tunnel, metal, fixture, 0, TunnelClearance - 0.13f, 0, 0.52f, 0.18f, 0.64f);
-                    AddBox(tunnel, side < 0 ? guide : gold, fixture, 0, TunnelClearance - 0.24f, 0,
+                    AddBox(tunnel, metal, fixture, 0, 2.78f, 0, 0.52f, 0.18f, 0.64f);
+                    AddBox(tunnel, side < 0 ? guide : gold, fixture, 0, 2.67f, 0,
                         0.42f, 0.055f, 0.53f);
                 }
             }
@@ -495,13 +609,15 @@ namespace RidgeRelay
                 foreach (float across in new[] { left, TunnelDivider, right })
                 {
                     TrackPose wall = Sample(portal, across / RaceSimulation.LaneWidth);
-                    AddBox(tunnel, stone, wall, 0, TunnelClearance * 0.5f, 0, 0.28f, TunnelClearance, 0.5f);
+                    AddBox(tunnel, stone, wall, 0, 1.5f, 0, 0.36f, 3, 0.65f);
                 }
-
-                TrackPose broad = Sample(portal, -0.5f);
-                TrackPose narrow = Sample(portal, RaceSimulation.TunnelFastLane);
-                AddBox(tunnel, guide, broad, 0, TunnelClearance - 0.11f, 0, 3.85f, 0.26f, 0.44f);
-                AddBox(tunnel, gold, narrow, 0, TunnelClearance - 0.11f, 0, 1.42f, 0.26f, 0.44f);
+                for(int arch=0;arch<16;arch++)
+                {
+                    float a=arch*Mathf.PI/16,b=(arch+0.94f)*Mathf.PI/16;
+                    Vector3 from=TrackPoint(portal,right*Mathf.Cos(a),3+2.6f*Mathf.Sin(a));
+                    Vector3 to=TrackPoint(portal,right*Mathf.Cos(b),3+2.6f*Mathf.Sin(b));
+                    AddBeam(tunnel,arch%3==0?stone:sandstone,from,to,0.55f);
+                }
             }
 
             Emit("Tank Tunnel", tunnel);
@@ -529,10 +645,15 @@ namespace RidgeRelay
             var random = new System.Random(8721);
             GameObject cliffModel = Resources.Load<GameObject>("RidgeRelay/Environment/Cliff");
             GameObject millModel = Resources.Load<GameObject>("RidgeRelay/Environment/Windmill");
+            GameObject treeModel = Resources.Load<GameObject>("RidgeRelay/Environment/CanyonTree");
+            GameObject shrubModel = Resources.Load<GameObject>("RidgeRelay/Environment/RiverShrub");
+            GameObject flowersModel = Resources.Load<GameObject>("RidgeRelay/Environment/LavenderPatch");
+            var greenery = new GameObject("Canyon vegetation");
+            greenery.transform.SetParent(transform, false);
             for (float segment = -9; segment < End; segment += ChunkLength)
             {
                 var sector = new Batch();
-                for (float s = segment + 2; s < Mathf.Min(segment + ChunkLength, End); s += 7)
+                for (float s = segment + 2; s < Mathf.Min(segment + ChunkLength, End); s += 12)
                 {
                     TrackPose p = Sample(s);
                     for (int side = -1; side <= 1; side += 2)
@@ -540,12 +661,13 @@ namespace RidgeRelay
                         float tunnelMargin = s > RaceSimulation.TunnelLockStart - 4 &&
                             s < RaceSimulation.TunnelLockEnd + 4 ? 4 : 0;
                         float riverMargin = s >= 90 && s <= 225 ? 7 : 0;
-                        float x = side * (8 + tunnelMargin + riverMargin + Range(random, 0, 11));
+                        float x = side * (10 + tunnelMargin + riverMargin + Range(random, 0, 7));
                         Vector3 basePoint = p.Offset(x, 0, Range(random, -3, 3));
                         basePoint.y = -9.8f;
-                        float width = Range(random, 5, 10);
-                        float height = Range(random, 7, 13);
-                        basePoint = ClearRoad(basePoint, width * 0.6f, height + 1, p.Right * side);
+                        float width = Range(random, 10, 18);
+                        float height = Mathf.Max(1.8f,
+                            p.Position.y + 9.8f - Range(random, 0.6f, 2.2f));
+                        basePoint = ClearRoad(basePoint, width * 0.6f, height + 8, p.Right * side);
                         AddRock(sector, sandCliff, redCliff, basePoint, width, height, random);
                         if (cliffModel != null && ((int)s + side) % 3 == 0)
                         {
@@ -554,18 +676,35 @@ namespace RidgeRelay
                             cliff.transform.localScale = Vector3.one * Range(random, 0.55f, 0.9f);
                         }
 
-                        Vector3 backdrop = p.Offset(side * Range(random, 23, 40), 0, Range(random, -7, 7));
+                        Vector3 backdrop = p.Offset(side * Range(random, 48, 70), 0, Range(random, -7, 7));
                         backdrop.y = -10;
-                        float backdropWidth = Range(random, 11, 19);
-                        float backdropHeight = Range(random, 15, 23);
+                        float backdropWidth = Range(random, 26, 42);
+                        float backdropHeight = Mathf.Max(Range(random, 15, 23),
+                            p.Position.y + 10 + Range(random, 8, 15));
                         backdrop = ClearRoad(backdrop, backdropWidth * 0.6f, backdropHeight, p.Right * side);
-                        AddRock(sector, mauveCliff, redCliff, backdrop, backdropWidth, backdropHeight, random);
+                        if ((int)(s - segment) < 15)
+                            AddRock(sector, mauveCliff, sandCliff, backdrop, backdropWidth, backdropHeight, random);
 
                         Vector3 splash = basePoint + p.Right * (-side * (width * 0.45f + 0.32f));
                         splash.y = -8.68f;
                         AddWorldBox(sector, ripple, splash, p.Forward, Range(random, 2, 4), 0.015f, Range(random, 0.3f, 1.1f));
 
                         Vector3 scrub = basePoint + Vector3.up * height;
+                        if (treeModel != null && random.NextDouble() < 0.48)
+                        {
+                            var tree = Instantiate(treeModel, scrub - Vector3.up * 0.1f,
+                                Quaternion.Euler(0, Range(random, 0, 360), 0), greenery.transform);
+                            tree.transform.localScale = Vector3.one * Range(random, 0.85f, 1.35f);
+                        }
+                        if (shrubModel != null)
+                        {
+                            var shrub = Instantiate(shrubModel, scrub + p.Right * side * 0.8f,
+                                Quaternion.Euler(0, Range(random, 0, 360), 0), greenery.transform);
+                            shrub.transform.localScale = Vector3.one * Range(random, 0.8f, 1.5f);
+                        }
+                        if (flowersModel != null && (int)s % 3 == 0)
+                            Instantiate(flowersModel, scrub + p.Right * -side * 0.7f,
+                                Quaternion.LookRotation(p.Forward, Vector3.up), greenery.transform);
                         for (int sprout = 0; sprout < 3; sprout++)
                         {
                             var root = scrub + new Vector3(Range(random, -1, 1), -0.1f, Range(random, -1, 1));
@@ -576,6 +715,59 @@ namespace RidgeRelay
 
                 Emit("Canyon cliffs", sector);
             }
+
+            var land = new Batch();
+            for (float s = 245; s < 630; s += 14)
+            {
+                if (s > 402 && s < 490) continue;
+                bool gapNearby = false;
+                foreach (CourseFeature feature in RaceSimulation.Features)
+                    if (feature.Gap && feature.Start < s + 15 && feature.End > s - 15) gapNearby = true;
+                if (gapNearby) continue;
+                Vector3 root = Sample(s).Position;
+                root.y = -9.8f;
+                float height = Sample(s).Position.y - root.y - 1;
+                foreach (TrackPose road in Path)
+                {
+                    float dx = road.Position.x - root.x;
+                    float dz = road.Position.z - root.z;
+                    if (dx * dx + dz * dz < 20 * 20)
+                        height = Mathf.Min(height, road.Position.y - root.y - 1);
+                }
+                if (height > 1) AddRock(land, sandCliff, redCliff, root, 28, height, random);
+            }
+            Emit("Ridge landforms", land);
+            var gardens=new Batch();
+            for(float distance=10;distance<640;distance+=24)
+            {
+                if(distance>RaceSimulation.TunnelLockStart-8 && distance<RaceSimulation.TunnelLockEnd+8)continue;
+                int side=((int)distance/24)%2==0?-1:1;
+                TrackPose road=Sample(distance);
+                Vector3 root=road.Offset(side*6.3f,0);
+                root=ClearRoad(root,0.8f,6,road.Right*side);
+                float top=root.y-0.35f;
+                foreach(TrackPose nearby in Path)
+                {
+                    float dx=nearby.Position.x-root.x,dz=nearby.Position.z-root.z;
+                    if(dx*dx+dz*dz<6*6)top=Mathf.Min(top,nearby.Position.y-0.6f);
+                }
+                root.y=-9.8f;
+                if(top-root.y<1)continue;
+                AddRock(gardens,green,sandCliff,root,7.5f,top-root.y,random);
+                Vector3 planted=new Vector3(root.x,top-0.02f,root.z);
+                if(treeModel!=null)
+                {
+                    var tree=Instantiate(treeModel,planted,Quaternion.Euler(0,Range(random,0,360),0),greenery.transform);
+                    tree.transform.localScale=Vector3.one*Range(random,1.15f,1.5f);
+                }
+                for(int i=0;i<3;i++)
+                {
+                    Vector3 at=planted+road.Forward*(i-1)*0.9f+road.Right*side*1.5f;
+                    if(shrubModel!=null)Instantiate(shrubModel,at,Quaternion.identity,greenery.transform);
+                    if(flowersModel!=null && i==1)Instantiate(flowersModel,at+road.Forward*0.6f,Quaternion.identity,greenery.transform);
+                }
+            }
+            Emit("Garden shelves",gardens);
 
             for (int i = 0; i < 7; i++)
             {
@@ -613,6 +805,91 @@ namespace RidgeRelay
             foreach (TrackPose pose in Path)
                 origin.x = Mathf.Max(origin.x, pose.Position.x + clearance + 1);
             return origin;
+        }
+
+        private void BuildWaterfalls()
+        {
+            Shader shader = Shader.Find("RidgeRelay/Waterfall");
+            if (shader == null) return;
+            var flow = new Material(shader) { name = "Flowing waterfall" };
+            ownedMaterials.Add(flow);
+            var falls = new Batch();
+            var cliffs = new Batch();
+            var random = new System.Random(614);
+            var mistMaterial=new Material(Shader.Find("RidgeRelay/Soft Smoke")){name="Waterfall spray"};
+            ownedMaterials.Add(mistMaterial);
+            foreach (float distance in new[] { 175f, 235f, 535f })
+            {
+                TrackPose road = Sample(distance);
+                float top = Mathf.Max(road.Position.y + 11, 8);
+                Vector3 basePoint = road.Offset(-15, 0, 5);
+                basePoint.y = -9.8f;
+                basePoint = ClearRoad(basePoint, 7.5f, top + 10, -road.Right);
+                AddRock(cliffs, sandCliff, redCliff, basePoint, 12, top + 9.8f, random);
+                Vector3 towardView = Sample(distance - 20).Position - basePoint;
+                towardView.y = 0;
+                towardView.Normalize();
+                Vector3 acrossFall = Vector3.Cross(Vector3.up, towardView).normalized;
+                Vector3 face = basePoint + towardView * 6.2f;
+                for (int segment = 0; segment < 12; segment++)
+                {
+                    float upper = Mathf.Lerp(top - 0.5f, -8.6f, segment / 12f);
+                    float lower = Mathf.Lerp(top - 0.5f, -8.6f, (segment + 1) / 12f);
+                    float spread = 3f + segment * 0.045f;
+                    Vector3 center = new Vector3(face.x, 0, face.z) + towardView * (segment * 0.035f);
+                    Vector3 a = center - acrossFall * spread + Vector3.up * upper;
+                    Vector3 b = center - acrossFall * spread + Vector3.up * lower;
+                    Vector3 c = center + acrossFall * spread + Vector3.up * lower;
+                    Vector3 d = center + acrossFall * spread + Vector3.up * upper;
+                    falls.Quad(flow, a, b, c, d, new Vector2(0, 1 - segment / 12f),
+                        new Vector2(0, 1 - (segment + 1) / 12f),
+                        new Vector2(1, 1 - (segment + 1) / 12f), new Vector2(1, 1 - segment / 12f));
+                }
+                Vector3 pool = new Vector3(face.x, -8.63f, face.z);
+                CreateWaterfallMist(pool,mistMaterial);
+                for (int i = 0; i < 24; i++)
+                {
+                    float a = i * Mathf.PI * 2 / 24;
+                    float b = (i + 0.8f) * Mathf.PI * 2 / 24;
+                    Vector3 directionA = new Vector3(Mathf.Cos(a), 0, Mathf.Sin(a));
+                    Vector3 directionB = new Vector3(Mathf.Cos(b), 0, Mathf.Sin(b));
+                    falls.Quad(ripple, pool + directionA * 1.5f, pool + directionA * 2.9f,
+                        pool + directionB * 2.9f, pool + directionB * 1.5f);
+                }
+            }
+            Emit("Waterfall cliffs", cliffs);
+            Emit("Waterfall cascades", falls);
+        }
+
+        private void CreateWaterfallMist(Vector3 pool, Material material)
+        {
+            var system=new GameObject("Waterfall spray").AddComponent<ParticleSystem>();
+            system.transform.SetParent(transform,false);
+            system.transform.SetPositionAndRotation(pool+Vector3.up*0.25f,Quaternion.Euler(-90,0,0));
+            system.Stop(true,ParticleSystemStopBehavior.StopEmittingAndClear);
+            var main=system.main;
+            main.loop=true;
+            main.duration=2;
+            main.startLifetime=new ParticleSystem.MinMaxCurve(1.2f,2);
+            main.startSize=new ParticleSystem.MinMaxCurve(1.5f,3);
+            main.startSpeed=new ParticleSystem.MinMaxCurve(0.3f,1.2f);
+            main.startColor=new Color(0.82f,0.96f,0.98f,0.32f);
+            main.maxParticles=40;
+            main.simulationSpace=ParticleSystemSimulationSpace.World;
+            var emission=system.emission;emission.rateOverTime=12;
+            var shape=system.shape;shape.shapeType=ParticleSystemShapeType.Cone;shape.radius=2.8f;shape.angle=22;
+            var size=system.sizeOverLifetime;size.enabled=true;
+            size.size=new ParticleSystem.MinMaxCurve(1,AnimationCurve.Linear(0,0.5f,1,1.4f));
+            var fade=system.colorOverLifetime;fade.enabled=true;
+            var gradient=new Gradient();
+            gradient.SetKeys(new[]{new GradientColorKey(Color.white,0),new GradientColorKey(Color.white,1)},
+                new[]{new GradientAlphaKey(0,0),new GradientAlphaKey(1,0.2f),new GradientAlphaKey(0,1)});
+            fade.color=new ParticleSystem.MinMaxGradient(gradient);
+            var renderer=system.GetComponent<ParticleSystemRenderer>();
+            renderer.sharedMaterial=material;
+            renderer.shadowCastingMode=ShadowCastingMode.Off;
+            renderer.receiveShadows=false;
+            system.Play();
         }
 
         private void AddWindmill(Vector3 origin, Vector3 forward, GameObject model)
@@ -673,27 +950,33 @@ namespace RidgeRelay
         private static void AddRock(Batch batch, Material cap, Material wall, Vector3 root,
             float width, float height, System.Random random)
         {
-            const int sides = 6;
-            var baseRing = new Vector3[sides];
-            var shoulder = new Vector3[sides];
-            var topRing = new Vector3[sides];
+            const int sides = 8;
+            float[] heights = { 0, 0.36f, 0.42f, 0.78f, 0.94f, 1 };
+            float[] widths = { 1.12f, 1.06f, 0.94f, 0.88f, 0.74f, 0.68f };
+            var rings = new Vector3[heights.Length, sides];
             float rotation = Range(random, 0, Mathf.PI * 2);
             for (int i = 0; i < sides; i++)
             {
                 float angle = rotation + Mathf.PI * 2 * i / sides;
                 Vector3 direction = new Vector3(Mathf.Cos(angle), 0, Mathf.Sin(angle));
-                float radius = width * Range(random, 0.42f, 0.58f);
-                baseRing[i] = root + direction * radius;
-                shoulder[i] = root + direction * (radius * 0.91f) + Vector3.up * (height * 0.76f);
-                topRing[i] = root + direction * (radius * 0.63f) + Vector3.up * height * Range(random, 0.92f, 1);
+                float radius = width * Range(random, 0.44f, 0.54f);
+                for (int level = 0; level < heights.Length; level++)
+                    rings[level, i] = root + direction * radius * widths[level] +
+                        Vector3.up * (height * heights[level]);
             }
-
+            for (int level = 0; level < heights.Length - 1; level++)
+                for (int i = 0; i < sides; i++)
+                {
+                    int next = (i + 1) % sides;
+                    batch.Quad(level == 1 || level >= 4 ? cap : wall,
+                        rings[level, i], rings[level + 1, i],
+                        rings[level + 1, next], rings[level, next]);
+                }
             for (int i = 0; i < sides; i++)
             {
                 int next = (i + 1) % sides;
-                batch.Quad(wall, baseRing[i], shoulder[i], shoulder[next], baseRing[next]);
-                batch.Quad(cap, shoulder[i], topRing[i], topRing[next], shoulder[next]);
-                batch.Triangle(cap, root + Vector3.up * height, topRing[next], topRing[i]);
+                batch.Triangle(cap, root + Vector3.up * height,
+                    rings[heights.Length - 1, next], rings[heights.Length - 1, i]);
             }
         }
 
@@ -875,11 +1158,27 @@ namespace RidgeRelay
             if (batch.Vertices.Count > 65535)
                 geometry.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
             geometry.SetVertices(batch.Vertices);
+            geometry.SetUVs(0, batch.Uvs);
             geometry.subMeshCount = batch.Materials.Count;
             for (int i = 0; i < batch.Materials.Count; i++)
                 geometry.SetTriangles(batch.Indices[i], i);
             geometry.RecalculateNormals();
+            if (objectName == "Canyon cliffs" || objectName == "Ridge landforms" || objectName == "Waterfall cliffs")
+            {
+                Vector3[] normals = geometry.normals;
+                var shared = new Dictionary<Vector3, Vector3>();
+                for (int i = 0; i < batch.Vertices.Count; i++)
+                {
+                    Vector3 vertex = batch.Vertices[i];
+                    shared.TryGetValue(vertex, out Vector3 sum);
+                    shared[vertex] = sum + normals[i];
+                }
+                for (int i = 0; i < normals.Length; i++)
+                    normals[i] = Vector3.Lerp(normals[i], shared[batch.Vertices[i]].normalized, 0.65f).normalized;
+                geometry.normals = normals;
+            }
             geometry.RecalculateBounds();
+            geometry.RecalculateTangents();
             instance.AddComponent<MeshFilter>().sharedMesh = geometry;
             instance.AddComponent<MeshRenderer>().sharedMaterials = batch.Materials.ToArray();
             ownedMeshes.Add(geometry);
@@ -895,6 +1194,7 @@ namespace RidgeRelay
         private sealed class Batch
         {
             public readonly List<Vector3> Vertices = new List<Vector3>();
+            public readonly List<Vector2> Uvs = new List<Vector2>();
             public readonly List<Material> Materials = new List<Material>();
             public readonly List<List<int>> Indices = new List<List<int>>();
 
@@ -910,12 +1210,31 @@ namespace RidgeRelay
 
             public void Quad(Material material, Vector3 a, Vector3 b, Vector3 c, Vector3 d)
             {
+                Vector3 normal = Vector3.Cross(b - a, c - a).normalized;
+                Quad(material, a, b, c, d, Project(a, normal), Project(b, normal),
+                    Project(c, normal), Project(d, normal));
+            }
+
+            private static Vector2 Project(Vector3 point, Vector3 normal)
+            {
+                if (Mathf.Abs(normal.y) > 0.5f) return new Vector2(point.x, point.z) * 0.25f;
+                return Mathf.Abs(normal.x) > Mathf.Abs(normal.z)
+                    ? new Vector2(point.z, point.y) * 0.2f : new Vector2(point.x, point.y) * 0.2f;
+            }
+
+            public void Quad(Material material, Vector3 a, Vector3 b, Vector3 c, Vector3 d,
+                Vector2 uvA, Vector2 uvB, Vector2 uvC, Vector2 uvD)
+            {
                 List<int> indices = IndicesFor(material);
                 int start = Vertices.Count;
                 Vertices.Add(a);
                 Vertices.Add(b);
                 Vertices.Add(c);
                 Vertices.Add(d);
+                Uvs.Add(uvA);
+                Uvs.Add(uvB);
+                Uvs.Add(uvC);
+                Uvs.Add(uvD);
                 indices.Add(start);
                 indices.Add(start + 1);
                 indices.Add(start + 2);
@@ -931,6 +1250,10 @@ namespace RidgeRelay
                 Vertices.Add(a);
                 Vertices.Add(b);
                 Vertices.Add(c);
+                Vector3 normal = Vector3.Cross(b - a, c - a).normalized;
+                Uvs.Add(Project(a, normal));
+                Uvs.Add(Project(b, normal));
+                Uvs.Add(Project(c, normal));
                 indices.Add(start);
                 indices.Add(start + 1);
                 indices.Add(start + 2);
